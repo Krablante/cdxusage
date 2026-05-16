@@ -357,7 +357,7 @@ try {
     pricingCacheFile,
   ]);
   assert.equal(missingFindForced.code, 1);
-  assert.match(missingFindForced.stderr, /find discovery is unavailable: spawn find ENOENT/);
+  assert.match(missingFindForced.stderr, /find discovery is unavailable: (spawn find ENOENT|unsupported platform win32)/);
   assert.doesNotMatch(missingFindForced.stderr, /node:internal|ErrorCaptureStackTrace/);
 } finally {
   if (previousPath == null) {
