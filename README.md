@@ -1,7 +1,7 @@
 # cdxusage
 
 <p align="center">
-  <strong>A fast, local Codex usage meter for tokens, sessions, and estimated OpenAI cost.</strong>
+  <strong>The fastest measured, optimized local Codex usage meter for tokens, sessions, and estimated OpenAI cost.</strong>
 </p>
 
 <p align="center">
@@ -12,13 +12,16 @@
   <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-555">
   <img alt="Node 20.19.4+" src="https://img.shields.io/badge/node-%3E%3D20.19.4-339933">
   <img alt="Codex compatible" src="https://img.shields.io/badge/codex-compatible-444">
+  <img alt="Cold scans 62 percent faster" src="https://img.shields.io/badge/cold%20scan-62%25%20faster-0f766e">
   <img alt="OpenAI pricing only" src="https://img.shields.io/badge/pricing-OpenAI%20only-111">
   <img alt="No database" src="https://img.shields.io/badge/database-none-0f766e">
 </p>
 
-`cdxusage` reads local Codex CLI history and shows daily, monthly, or
-per-session usage: input tokens, cached input, output, reasoning tokens, and an
-estimated API-equivalent OpenAI cost.
+`cdxusage` is the performance-first Codex usage CLI: the fastest measured and
+most optimized local meter on the large-history benchmark tracked in this repo.
+It reads local Codex CLI history and shows daily, monthly, or per-session usage:
+input tokens, cached input, output, reasoning tokens, and an estimated
+API-equivalent OpenAI cost.
 
 It is built for large Codex histories. The original
 `npx -y @ccusage/codex@latest` path can become painful on big archives: long
@@ -144,6 +147,13 @@ It is not an invoice and may differ from subscription or credit accounting
 screens.
 
 ## Performance
+
+This project is positioned around the fast path: streaming JSONL, compact
+per-file cache summaries, and a Linux/GNU native batch prefilter when the host
+supports it. On the current large-history benchmark, the optimized public build
+cuts cold full-scan wall time by `62.4%`, CPU time by `62.9%`, and RAM by
+`48.5%` versus the pre-native public baseline, while static synthetic fixtures
+still match across small, medium, large, huge, and adversarial cases.
 
 Run the local benchmark helper against your own Codex archive:
 
