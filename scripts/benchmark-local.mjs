@@ -50,10 +50,14 @@ function parseArgs(argv) {
     const token = argv[index];
     const [key, inlineValue] = token.split('=', 2);
     if (key === '--since' || key === '--timeout' || key === '--upstream-timeout' || key === '--cdxusage-timeout') {
-      out[key.slice(2)] = inlineValue ?? argv[++index];
+      out[toCamelCase(key.slice(2))] = inlineValue ?? argv[++index];
     }
   }
   return out;
+}
+
+function toCamelCase(value) {
+  return value.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
 }
 
 async function measure(label, command, commandArgs, timeoutSeconds) {

@@ -134,6 +134,9 @@ non_cached_input * input_price
 For long-context tiered prices, `cdxusage` keeps compact per-threshold billing
 summaries in the file cache. Thresholds are applied to request/input context
 length without storing every token event in memory or cache.
+Known official long-context uplifts, including standard GPT-5.5 and GPT-5.4
+sessions above 272K input tokens, are also applied when reading older pricing
+caches that predate those tier records.
 
 Default pricing is `auto`. It reads the resolved Codex home `config.toml` and
 treats `service_tier = "priority"` or legacy `"fast"` as priority pricing.

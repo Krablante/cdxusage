@@ -6,6 +6,7 @@ import {
   calculateCostFromUsageOrEvents,
   calculateCostUSD,
   loadPricingCatalog,
+  parseOpenAIDevPricingHtml,
 } from '../src/pricing.mjs';
 
 const root = path.join(tmpdir(), `cdxusage-pricing-${process.pid}`);
@@ -24,6 +25,63 @@ const catalog = await loadPricingCatalog({
 const resolved = catalog.getPricing('gpt-test');
 assert.equal(resolved.missing, false);
 assertClose(calculateCostUSD({ inputTokens: 10, cachedInputTokens: 4, outputTokens: 2 }, resolved.price), 0.0000104);
+
+const bundledStandard = await loadPricingCatalog({
+  offline: true,
+  cacheFile: path.join(root, 'missing-standard-cache.json'),
+});
+const bundledGpt55Standard = bundledStandard.getPricing('gpt-5.5');
+assert.deepEqual(bundledGpt55Standard.price.tiered, [
+  { kind: 'input_cost_per_token', thresholdTokens: 272_000, costPerMToken: 10 },
+  { kind: 'cache_read_input_token_cost', thresholdTokens: 272_000, costPerMToken: 1 },
+  { kind: 'output_cost_per_token', thresholdTokens: 272_000, costPerMToken: 45 },
+]);
+assert.deepEqual(bundledStandard.metadata.billingThresholds, [272_000]);
+assertClose(
+  calculateCostFromUsageOrEvents(
+    { inputTokens: 300_000, cachedInputTokens: 100_000, outputTokens: 10_000 },
+    bundledGpt55Standard.price,
+    { version: 1, count: 1, totals: [200_000, 100_000, 10_000], over: { 272_000: [200_000, 100_000, 10_000] } },
+  ),
+  2.55,
+);
+const bundledGpt54Standard = bundledStandard.getPricing('gpt-5.4');
+assert.deepEqual(bundledGpt54Standard.price.tiered, [
+  { kind: 'input_cost_per_token', thresholdTokens: 272_000, costPerMToken: 5 },
+  { kind: 'cache_read_input_token_cost', thresholdTokens: 272_000, costPerMToken: 0.5 },
+  { kind: 'output_cost_per_token', thresholdTokens: 272_000, costPerMToken: 22.5 },
+]);
+
+const parsedStandard = parseOpenAIDevPricingHtml(
+  '<div component-export="TextTokenPricingTables" props="&quot;tier&quot;:[0,&quot;standard&quot;],[0,&quot;GPT-5.5&quot;],[0,5],[0,0.5],[0,30]"></div>',
+  { tier: 'standard' },
+);
+assert.deepEqual(parsedStandard['gpt-5.5'].tiered, bundledGpt55Standard.price.tiered);
+
+const oldOpenAiCacheFile = path.join(root, 'old-openai-cache.json');
+await writeFile(
+  oldOpenAiCacheFile,
+  `${JSON.stringify({
+    version: 1,
+    source: 'openai-official',
+    sourceUrl: 'https://developers.openai.com/api/docs/pricing',
+    fetchedAt: new Date().toISOString(),
+    tier: 'standard',
+    data: {
+      'gpt-5.5': {
+        inputCostPerMToken: 5,
+        cachedInputCostPerMToken: 0.5,
+        outputCostPerMToken: 30,
+        source: 'openai-official',
+        sourceUrl: 'https://developers.openai.com/api/docs/pricing',
+        serviceTier: 'standard',
+        tierAdjusted: false,
+      },
+    },
+  })}\n`,
+);
+const oldOpenAiCacheCatalog = await loadPricingCatalog({ offline: true, cacheFile: oldOpenAiCacheFile });
+assert.deepEqual(oldOpenAiCacheCatalog.getPricing('gpt-5.5').price.tiered, bundledGpt55Standard.price.tiered);
 
 const priorityCatalog = await loadPricingCatalog({
   tier: 'priority',
@@ -165,7 +223,7 @@ try {
   assert.equal(officialGpt55.price.inputCostPerMToken, 12.5);
   assert.equal(officialGpt55.price.cachedInputCostPerMToken, 1.25);
   assert.equal(officialGpt55.price.outputCostPerMToken, 75);
-  assert.equal(officialGpt55.detail.source, 'openai-official');
+  assert.equal(officialGpt55.detail.source, 'openai-priority-official');
 } finally {
   globalThis.fetch = officialPriorityFetch;
 }

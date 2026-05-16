@@ -114,6 +114,10 @@ Pricing sources are intentionally OpenAI-only:
 2. live OpenAI Priority Processing pricing
 3. bundled OpenAI/Codex fallback snapshot
 
+Known official long-context uplifts are applied when needed. For example,
+standard GPT-5.5 and GPT-5.4 sessions above 272K input tokens use OpenAI's
+long-context rates.
+
 Non-OpenAI model routes are not guessed. They are reported in
 `pricing.missingModels` when stats are enabled.
 

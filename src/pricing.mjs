@@ -18,6 +18,12 @@ const CODEX_MODEL_ALIASES = new Map([
   ['gpt-5.3-codex', 'gpt-5.2-codex'],
 ]);
 
+const STANDARD_LONG_CONTEXT_THRESHOLD_TOKENS = 272_000;
+const STANDARD_LONG_CONTEXT_TIERS = new Map([
+  ['gpt-5.5', standardLongContextTiers(10, 1, 45)],
+  ['gpt-5.4', standardLongContextTiers(5, 0.5, 22.5)],
+]);
+
 const BUNDLED_STANDARD_PRICING = {
   'gpt-5.5': officialPrice(5, 0.5, 30),
   'gpt-5.4': officialPrice(2.5, 0.25, 15),
@@ -160,7 +166,7 @@ export function parseOpenAIDevPricingHtml(html, options = {}) {
       if (componentTier !== tier) {
         continue;
       }
-      addRowsFromProps(component.props, out, 'openai-official');
+      addRowsFromProps(component.props, out, tier === 'priority' ? 'openai-priority-official' : 'openai-official');
     }
   }
 
@@ -181,9 +187,10 @@ export function parseOpenAIDevPricingHtml(html, options = {}) {
     }
   }
 
-  for (const price of Object.values(out)) {
+  for (const [model, price] of Object.entries(out)) {
     price.serviceTier = tier;
     price.tierAdjusted = tier !== 'standard';
+    addKnownStandardLongContextTiers(model, price);
   }
   return out;
 }
@@ -392,15 +399,16 @@ async function fetchOpenAIOfficialPricing(options) {
 }
 
 function createCatalog(data, metadata) {
+  const catalogData = withKnownPricingAdjustments(data);
   const exact = new Map();
-  for (const [model, price] of Object.entries(data)) {
+  for (const [model, price] of Object.entries(catalogData)) {
     exact.set(normalizeKey(model), { model, price });
   }
 
   return {
     metadata: {
       ...metadata,
-      billingThresholds: pricingBillingThresholds(data),
+      billingThresholds: pricingBillingThresholds(catalogData),
     },
     getPricing(model) {
       const candidates = createModelCandidates(model);
@@ -433,6 +441,19 @@ function createCatalog(data, metadata) {
       };
     },
   };
+}
+
+function withKnownPricingAdjustments(data) {
+  const out = {};
+  for (const [model, price] of Object.entries(data ?? {})) {
+    const adjusted = {
+      ...price,
+      tiered: Array.isArray(price?.tiered) ? price.tiered.map((tier) => ({ ...tier })) : undefined,
+    };
+    addKnownStandardLongContextTiers(model, adjusted);
+    out[model] = adjusted;
+  }
+  return out;
 }
 
 function pricingBillingThresholds(data) {
@@ -528,20 +549,21 @@ function createModelCandidates(model) {
 function normalizeRawPricingData(raw, defaults) {
   const out = {};
   for (const [model, value] of Object.entries(raw ?? {})) {
+    const normalizedModel = normalizeModelName(model);
     const price = normalizePrice(value, {
       source: value?.sourceName ?? value?.source ?? defaults.source,
       sourceUrl: value?.sourceUrl ?? defaults.sourceUrl,
       tier: defaults.tier,
-    });
+    }, normalizedModel);
     if (!price) {
       continue;
     }
-    out[normalizeModelName(model)] = price;
+    out[normalizedModel] = price;
   }
   return out;
 }
 
-function normalizePrice(value, metadata) {
+function normalizePrice(value, metadata, model) {
   if (!value || typeof value !== 'object') {
     return null;
   }
@@ -626,6 +648,7 @@ function normalizePrice(value, metadata) {
     });
   }
 
+  addKnownStandardLongContextTiers(model, price);
   return price;
 }
 
@@ -693,6 +716,46 @@ function officialPriorityPrice(inputCostPerMToken, cachedInputCostPerMToken, out
     sourceName: 'openai-priority-official-bundled',
     sourceUrl: OPENAI_PRIORITY_PROCESSING_URL,
   };
+}
+
+function standardLongContextTiers(inputCostPerMToken, cachedInputCostPerMToken, outputCostPerMToken) {
+  return [
+    {
+      kind: 'input_cost_per_token',
+      thresholdTokens: STANDARD_LONG_CONTEXT_THRESHOLD_TOKENS,
+      costPerMToken: inputCostPerMToken,
+    },
+    {
+      kind: 'cache_read_input_token_cost',
+      thresholdTokens: STANDARD_LONG_CONTEXT_THRESHOLD_TOKENS,
+      costPerMToken: cachedInputCostPerMToken,
+    },
+    {
+      kind: 'output_cost_per_token',
+      thresholdTokens: STANDARD_LONG_CONTEXT_THRESHOLD_TOKENS,
+      costPerMToken: outputCostPerMToken,
+    },
+  ];
+}
+
+function addKnownStandardLongContextTiers(model, price) {
+  if (!model || price?.serviceTier !== 'standard' || !String(price.source ?? '').startsWith('openai-official')) {
+    return;
+  }
+  const tiers = STANDARD_LONG_CONTEXT_TIERS.get(normalizeModelName(model));
+  if (!tiers) {
+    return;
+  }
+  const existing = new Set((price.tiered ?? []).map((tier) => `${tier.kind}:${tier.thresholdTokens}`));
+  for (const tier of tiers) {
+    const key = `${tier.kind}:${tier.thresholdTokens}`;
+    if (existing.has(key)) {
+      continue;
+    }
+    price.tiered ??= [];
+    price.tiered.push({ ...tier });
+    existing.add(key);
+  }
 }
 
 function bundledMetadata(tier) {
