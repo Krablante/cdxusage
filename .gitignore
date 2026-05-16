@@ -1,0 +1,35 @@
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# Local agent/operator overlays
+AGENTS.md
+AGENTS.local.md
+atlas.toml
+
+# Logs, temp files, and local outputs
+*.log
+*.tgz
+*.tar.gz
+logs/
+tmp/
+.cache/
+artifacts/
+reports/
+screenshots/
+playwright-report/
+
+# Common dependency / build outputs
+node_modules/
+dist/
+coverage/
+portable/
+
+# Accidental runtime-in-repo
+data/
+runtime/
+storage/
+backups-local/
+
+# Tune this file per repo once the real stack is known.
