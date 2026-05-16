@@ -529,10 +529,14 @@ for (let i = 0; i < 3000; i += 1) {
 }
 const fakeBin = path.join(root, 'fake-native-bin');
 await mkdir(fakeBin, { recursive: true });
-await writeFile(path.join(fakeBin, 'xargs'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+if (process.platform === 'win32') {
+  await writeFile(path.join(fakeBin, 'xargs.cmd'), '@echo off\r\nexit /b 1\r\n');
+} else {
+  await writeFile(path.join(fakeBin, 'xargs'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+}
 const previousPath = process.env.PATH;
 process.env.CDXUSAGE_SCAN_MODE = 'grep-batch';
-process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+process.env.PATH = `${fakeBin}${path.delimiter}${previousPath ?? ''}`;
 try {
   const nativeEarlyExit = await collectUsage({
     codexHome: nativeEarlyExitHome,

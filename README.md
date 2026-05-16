@@ -12,7 +12,8 @@
   <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-555">
   <img alt="Node 20.19.4+" src="https://img.shields.io/badge/node-%3E%3D20.19.4-339933">
   <img alt="Codex compatible" src="https://img.shields.io/badge/codex-compatible-444">
-  <img alt="Cold scans 62 percent faster" src="https://img.shields.io/badge/cold%20scan-62%25%20faster-0f766e">
+  <img alt="Cold scan 96 percent plus faster" src="https://img.shields.io/badge/cold%20scan-96%25%2B%20faster-0f766e">
+  <img alt="Warm scan 99 percent plus faster" src="https://img.shields.io/badge/warm%20scan-99%25%2B%20faster-0f766e">
   <img alt="OpenAI pricing only" src="https://img.shields.io/badge/pricing-OpenAI%20only-111">
   <img alt="No database" src="https://img.shields.io/badge/database-none-0f766e">
 </p>
