@@ -137,10 +137,11 @@ length without storing every token event in memory or cache.
 
 Default pricing is `auto`. It reads the resolved Codex home `config.toml` and
 treats `service_tier = "priority"` or legacy `"fast"` as priority pricing.
-Codex logs do not expose per-request service tier, so auto mode prices only
-`gpt-5.4,gpt-5.4-mini,gpt-5.5` as priority by default. Use `--no-priority` or
-`--speed standard` to force non-priority pricing. Use `--priority-models all`
-or a comma-separated list to override the priority scope.
+Codex logs do not expose per-request service tier, so auto mode prices all
+OpenAI models with official priority rates as priority when the resolved config
+sets priority/fast mode. Use `--no-priority` or `--speed standard` to force
+non-priority pricing. Use `--priority-models all` or a comma-separated list to
+override the priority scope.
 
 Non-OpenAI model routes are not estimated. They appear in
 `pricing.missingModels` when `--include-stats` is used.

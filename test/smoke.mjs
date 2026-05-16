@@ -51,7 +51,7 @@ try {
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.monthly.length, 1);
   assert.equal(payload.pricing.tier, 'priority');
-  assert.deepEqual(payload.pricing.priorityModels, ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5']);
+  assert.equal(payload.pricing.priorityModels, null);
   assert.equal(payload.pricing.missingModels.length, 0);
   assert.equal(payload.stats.codexHome, codexHome);
   console.log('smoke ok');

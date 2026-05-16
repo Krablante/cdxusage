@@ -257,6 +257,17 @@ assertClose(
   0.077,
 );
 
+const nonOpenAiAliasCatalog = await loadPricingCatalog({
+  pricingData: {
+    'moonshot/kimi-k2.6': {
+      inputCostPerMToken: 1,
+      cachedInputCostPerMToken: 0.1,
+      outputCostPerMToken: 2,
+    },
+  },
+});
+assert.equal(nonOpenAiAliasCatalog.getPricing('moonshotai/kimi-k2.6').missing, true);
+
 await rm(root, { recursive: true, force: true });
 console.log('pricing ok');
 

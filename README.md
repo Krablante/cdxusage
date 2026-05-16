@@ -88,12 +88,8 @@ Default pricing mode is `auto`.
 
 `cdxusage` reads the resolved Codex home's `config.toml`. If it sees
 `service_tier = "priority"` or legacy `service_tier = "fast"`, it applies
-OpenAI priority prices to the Codex models that currently expose priority rates
-in Codex usage:
-
-```text
-gpt-5.4,gpt-5.4-mini,gpt-5.5
-```
+OpenAI priority prices to all OpenAI models that currently expose official
+priority rates.
 
 Force standard pricing:
 
@@ -157,36 +153,27 @@ Intentional differences from `@ccusage/codex`:
 
 ## Benchmarks
 
-Measured on the same local Codex archive and bounded with `nice`, `ionice`, and
-`timeout`.
+Run the local benchmark helper against your own Codex archive:
 
-Controlled largest-file fixture:
+```bash
+npm run benchmark -- --since 2026-05-01 --timeout 25
+```
 
-| Tool | Scenario | Time | RSS |
-| --- | --- | ---: | ---: |
-| `@ccusage/codex@18.0.11` | largest JSONL | `2.59s` | `823972KB` |
-| `cdxusage` | same file, cold | `0.66s` | `200888KB` |
-| `cdxusage` | same file, warm | `0.07s` | `60996KB` |
+It runs `cdxusage` cold, `cdxusage` warm, and
+`npx -y @ccusage/codex@latest` with the same date filter. On Linux it also
+captures max RSS through `/usr/bin/time -v`.
 
-Improvements:
-
-- cold: 74.5% faster, 75.6% less RSS
-- warm: 97.3% faster, 92.6% less RSS
-
-Token totals and `costUSD` matched upstream exactly on this fixture.
-
-Real filtered profile:
+Recent local sanity check on a large Codex archive:
 
 | Tool | Scenario | Time | RSS | Result |
 | --- | --- | ---: | ---: | --- |
-| `@ccusage/codex@18.0.11` | `--since 2026-05-01`, timeout 120s | `120.01s` | n/a | timed out |
-| `cdxusage` | same filter, cold | `4.35s` | `201528KB` | complete |
-| `cdxusage` | same filter, warm | `0.21s` | `92204KB` | complete |
+| `@ccusage/codex@18.0.11` | `--since 2026-05-01`, timeout 25s | `>25.01s` | n/a | timed out |
+| `cdxusage` | same filter, cold | `3.63s` | `173784KB` | complete |
+| `cdxusage` | same filter, warm | `0.24s` | `96856KB` | complete |
 
-Compared with upstream's bounded timeout, real-profile cold output is at least
-96.4% faster and warm output is at least 99.8% faster. Upstream did not
-complete in the timeout window, so real-profile upstream RSS is not comparable;
-the completed controlled fixture above is the RSS comparison.
+Compared with upstream's bounded timeout, this run was at least 85.5% faster
+cold and 99.0% faster warm. Upstream did not complete in the timeout window, so
+upstream RSS is not comparable for this real-profile check.
 
 Live pricing status from a fresh check: OpenAI official + bundled fallback,
 `modelCount: 63`. Non-OpenAI routes, if present in local Codex logs, are left

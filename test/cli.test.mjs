@@ -45,11 +45,27 @@ assert.equal(parseArgs(['sessions']).command, 'sessions');
 assert.equal(parseArgs(['monthly']).speed, 'auto');
 assert.equal(parseArgs(['daily', '--speed', 'auto']).speed, 'auto');
 assert.equal(parseArgs(['daily', '--speed', 'fast']).speed, 'fast');
+assert.equal(parseArgs(['daily', '--speed=fast']).speed, 'fast');
 assert.equal(parseArgs(['daily', '--no-priority']).speed, 'standard');
 assert.equal(parseArgs(['daily', '--priority-models', 'gpt-5.4,gpt-5.5']).priorityModels, 'gpt-5.4,gpt-5.5');
+assert.equal(parseArgs(['daily', '--priority-models=gpt-5.4,gpt-5.5']).priorityModels, 'gpt-5.4,gpt-5.5');
 assert.deepEqual(
   { sort: parseArgs(['daily', '--sort', 'tokens', '--order', 'desc']).sort, order: parseArgs(['daily', '--sort', 'tokens', '--order', 'desc']).order },
   { sort: 'tokens', order: 'desc' },
+);
+assert.deepEqual(
+  {
+    since: parseArgs(['daily', '--since=2026-05-16']).since,
+    until: parseArgs(['daily', '--until=2026-05-17']).until,
+    timezone: parseArgs(['daily', '--timezone=UTC']).timezone,
+    cacheFile: parseArgs(['daily', '--cache-file=/tmp/cdxusage-cache.json']).cacheFile,
+  },
+  {
+    since: '2026-05-16',
+    until: '2026-05-17',
+    timezone: 'UTC',
+    cacheFile: '/tmp/cdxusage-cache.json',
+  },
 );
 assert.equal(parseArgs(['daily', '--max-cache-bytes', '1048576']).maxCacheBytes, '1048576');
 assert.throws(() => parseArgs(['daily', '--discovery', 'bogus']), /Invalid --discovery/);
@@ -105,7 +121,7 @@ const table = await runCli([
 ]);
 assert.match(table.stdout, /Codex Token Usage Report - Monthly/);
 assert.match(table.stdout, /Total Tokens/);
-assert.match(table.stdout, /\$0\.002025/);
+assert.match(table.stdout, /\$0\.004050/);
 assert.doesNotMatch(table.stdout, /├[^\n]+\n├/);
 
 const fastPricing = await runCli([
@@ -136,7 +152,7 @@ const autoPricing = await runCli([
   '--pricing-cache-file',
   path.join(root, 'cache/auto-pricing.json'),
 ]);
-assert.equal(JSON.parse(autoPricing.stdout).totals.costUSD, 0.002025);
+assert.equal(JSON.parse(autoPricing.stdout).totals.costUSD, 0.00405);
 
 const autoAllPricing = await runCli([
   'daily',

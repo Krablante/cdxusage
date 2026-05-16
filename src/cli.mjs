@@ -5,10 +5,29 @@ import { collectUsage, defaultCacheFile, normalizeDate, safeTimeZone } from './e
 import { DEFAULT_LOCALE, DEFAULT_TIMEZONE, formatDisplayDate, formatDisplayMonth, toPublicModels, toPublicUsage } from './format.mjs';
 import { renderReportTable } from './table.mjs';
 
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 
 const COMMANDS = new Set(['daily', 'monthly', 'session', 'sessions']);
-const DEFAULT_AUTO_PRIORITY_MODELS = Object.freeze(['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5']);
+const DEFAULT_AUTO_PRIORITY_MODELS = null;
+const LONG_OPTIONS_WITH_VALUES = new Set([
+  '--since',
+  '--until',
+  '--timezone',
+  '--locale',
+  '--codex-home',
+  '--sessions-dir',
+  '--cache-file',
+  '--pricing-cache-file',
+  '--pricing-ttl-hours',
+  '--pricing-fetch-timeout-ms',
+  '--max-cache-bytes',
+  '--discovery',
+  '--discovery-mode',
+  '--speed',
+  '--priority-models',
+  '--sort',
+  '--order',
+]);
 
 export async function main(argv = process.argv.slice(2), io = { stdout: process.stdout, stderr: process.stderr }) {
   let args;
@@ -117,7 +136,12 @@ export function parseArgs(argv) {
     args.commandSpecified = true;
   }
   while (rest.length > 0) {
-    const token = rest.shift();
+    let token = rest.shift();
+    const expanded = splitLongOptionValue(token);
+    if (expanded) {
+      token = expanded.option;
+      rest.unshift(expanded.value);
+    }
     switch (token) {
       case '-h':
       case '--help':
@@ -478,6 +502,21 @@ function requireValue(option, rest) {
     throw new Error(`${option} requires a value`);
   }
   return value;
+}
+
+function splitLongOptionValue(token) {
+  if (!token?.startsWith('--')) {
+    return null;
+  }
+  const separatorIndex = token.indexOf('=');
+  if (separatorIndex < 0) {
+    return null;
+  }
+  const option = token.slice(0, separatorIndex);
+  if (!LONG_OPTIONS_WITH_VALUES.has(option)) {
+    return null;
+  }
+  return { option, value: token.slice(separatorIndex + 1) };
 }
 
 function helpText(command) {

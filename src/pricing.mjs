@@ -514,9 +514,6 @@ function createModelCandidates(model) {
     candidates.add(alias);
   }
 
-  if (normalized.startsWith('moonshotai/')) {
-    candidates.add(`moonshot/${normalized.slice('moonshotai/'.length)}`);
-  }
   if (normalized.startsWith('openai/')) {
     candidates.add(normalized.slice('openai/'.length));
   }

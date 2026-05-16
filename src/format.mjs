@@ -1,5 +1,5 @@
 export const DEFAULT_LOCALE = 'en-CA';
-export const DEFAULT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+export const DEFAULT_TIMEZONE = 'UTC';
 
 export function formatDisplayDate(dateKey, locale = DEFAULT_LOCALE) {
   const [yearStr = '0', monthStr = '1', dayStr = '1'] = dateKey.split('-');

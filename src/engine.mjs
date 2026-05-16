@@ -15,7 +15,6 @@ const TURN_NEEDLE = Buffer.from('turn_context');
 const MODEL_RE = /"model"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/;
 const FIND_FIELD_SEPARATOR = '\x1f';
 const FIND_RECORD_SEPARATOR = '\x1e';
-const PRUNE_SAFETY_MS = 48 * 60 * 60 * 1000;
 const DEFAULT_MAX_CACHE_BYTES = 64 * 1024 * 1024;
 
 export function defaultCacheFile() {
@@ -30,7 +29,8 @@ export async function collectUsage(options = {}) {
   const timezone = safeTimeZone(options.timezone);
   const since = normalizeDate(options.since);
   const until = normalizeDate(options.until);
-  const pruneBeforeMs = since ? Date.parse(`${since}T00:00:00.000Z`) - PRUNE_SAFETY_MS : undefined;
+  const pruneBeforeDate = since ? addDaysToDateKey(since, -2) : undefined;
+  const pruneAfterDate = until ? addDaysToDateKey(until, 2) : undefined;
   const cacheFile = options.cacheFile ?? defaultCacheFile();
   const useCache = options.useCache !== false;
   const saveCache = useCache && options.saveCache !== false;
@@ -69,9 +69,10 @@ export async function collectUsage(options = {}) {
     stats.filesSeen += 1;
     stats.bytesSeen += st.size;
 
-    if (pruneBeforeMs !== undefined && st.mtimeMs < pruneBeforeMs) {
-      stats.filesSkippedByMtime += 1;
-      stats.bytesSkippedByMtime += st.size;
+    const sessionInfo = makeSessionInfo(file, sessionsDir);
+    if (shouldSkipBySessionPathDate(sessionInfo.directory, pruneBeforeDate, pruneAfterDate)) {
+      stats.filesSkippedByPathDate += 1;
+      stats.bytesSkippedByPathDate += st.size;
       const oldEntry = useCache ? cache.files[file] : undefined;
       if (oldEntry && sameFile(st, oldEntry)) {
         nextFiles[file] = oldEntry;
@@ -79,7 +80,6 @@ export async function collectUsage(options = {}) {
       continue;
     }
 
-    const sessionInfo = makeSessionInfo(file, sessionsDir);
     const oldEntry = useCache ? cache.files[file] : undefined;
     let entry;
 
@@ -604,7 +604,7 @@ function buildReport(aggregate, stats, nextFiles) {
     addUsage(totals, day);
   }
 
-  const filesEligibleForCache = stats.filesSeen - stats.filesSkippedByMtime;
+  const filesEligibleForCache = stats.filesSeen - stats.filesSkippedByMtime - stats.filesSkippedByPathDate;
   return {
     daily,
     monthly,
@@ -776,6 +776,7 @@ function createStats(cache, timezone, billingThresholds = DEFAULT_BILLING_THRESH
     billingThresholds,
     filesSeen: 0,
     filesSkippedByMtime: 0,
+    filesSkippedByPathDate: 0,
     filesFromCache: 0,
     filesScannedFull: 0,
     filesScannedTail: 0,
@@ -787,6 +788,7 @@ function createStats(cache, timezone, billingThresholds = DEFAULT_BILLING_THRESH
     bytesSeen: 0,
     bytesRead: 0,
     bytesSkippedByMtime: 0,
+    bytesSkippedByPathDate: 0,
     bytesSkippedByCache: 0,
     bytesSkippedByTailCache: 0,
     cacheEntriesLoaded: Object.keys(cache.files).length,
@@ -867,9 +869,45 @@ export function isWithinRange(dateKey, since, until) {
   return true;
 }
 
+function shouldSkipBySessionPathDate(directory, pruneBeforeDate, pruneAfterDate) {
+  if (!pruneBeforeDate && !pruneAfterDate) {
+    return false;
+  }
+  const dateKey = sessionPathDateKey(directory);
+  if (!dateKey) {
+    return false;
+  }
+  if (pruneBeforeDate && dateKey < pruneBeforeDate) {
+    return true;
+  }
+  if (pruneAfterDate && dateKey > pruneAfterDate) {
+    return true;
+  }
+  return false;
+}
+
+function sessionPathDateKey(directory) {
+  const match = String(directory).match(/(?:^|\/)(\d{4})\/(\d{2})\/(\d{2})(?:\/|$)/);
+  if (!match) {
+    return null;
+  }
+  const dateKey = `${match[1]}-${match[2]}-${match[3]}`;
+  try {
+    return normalizeDate(dateKey);
+  } catch {
+    return null;
+  }
+}
+
+function addDaysToDateKey(dateKey, days) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
 export function safeTimeZone(timezone) {
   if (timezone == null || String(timezone).trim() === '') {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC';
+    return 'UTC';
   }
   try {
     Intl.DateTimeFormat('en-US', { timeZone: timezone });

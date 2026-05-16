@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { appendFile, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { collectUsage, normalizeDate } from '../src/engine.mjs';
@@ -121,6 +121,69 @@ const filtered = await collectUsage({ codexHome, cacheFile, timezone: 'UTC', sin
 assert.equal(filtered.daily.length, 1);
 assert.equal(filtered.sessions[0].totalTokens, 21);
 assert.equal(filtered.totals.totalTokens, 21);
+
+const defaultTimezoneHome = path.join(root, 'default-timezone-codex-home');
+const defaultTimezoneSessions = path.join(defaultTimezoneHome, 'sessions/2026/05/16');
+await mkdir(defaultTimezoneSessions, { recursive: true });
+await writeFile(
+  path.join(defaultTimezoneSessions, 'utc-boundary.jsonl'),
+  [
+    JSON.stringify({ timestamp: '2026-05-16T02:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-test' } }),
+    JSON.stringify({
+      timestamp: '2026-05-16T02:00:00.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, total_tokens: 2 } },
+      },
+    }),
+    '',
+  ].join('\n'),
+);
+const defaultTimezoneReport = await collectUsage({
+  codexHome: defaultTimezoneHome,
+  cacheFile: path.join(root, 'default-timezone-cache.json'),
+  pricingData,
+});
+assert.equal(defaultTimezoneReport.stats.timezone, 'UTC');
+assert.equal(defaultTimezoneReport.daily[0].key, '2026-05-16');
+const losAngelesReport = await collectUsage({
+  codexHome: defaultTimezoneHome,
+  cacheFile: path.join(root, 'default-timezone-cache-la.json'),
+  timezone: 'America/Los_Angeles',
+  pricingData,
+});
+assert.equal(losAngelesReport.daily[0].key, '2026-05-15');
+
+const staleMtimeHome = path.join(root, 'stale-mtime-codex-home');
+const staleMtimeSessions = path.join(staleMtimeHome, 'sessions/2026/05/16');
+const staleMtimeFile = path.join(staleMtimeSessions, 'stale-mtime.jsonl');
+await mkdir(staleMtimeSessions, { recursive: true });
+await writeFile(
+  staleMtimeFile,
+  [
+    JSON.stringify({ timestamp: '2026-05-16T00:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-test' } }),
+    JSON.stringify({
+      timestamp: '2026-05-16T00:01:00.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 5, cached_input_tokens: 0, output_tokens: 1, total_tokens: 6 } },
+      },
+    }),
+    '',
+  ].join('\n'),
+);
+await utimes(staleMtimeFile, new Date('2020-01-01T00:00:00.000Z'), new Date('2020-01-01T00:00:00.000Z'));
+const staleMtimeReport = await collectUsage({
+  codexHome: staleMtimeHome,
+  cacheFile: path.join(root, 'stale-mtime-cache.json'),
+  timezone: 'UTC',
+  since: '2026-05-16',
+  pricingData,
+});
+assert.equal(staleMtimeReport.totals.totalTokens, 6);
+assert.equal(staleMtimeReport.stats.filesSkippedByMtime, 0);
 
 await writeFile(cacheFile, 'x'.repeat(1024 * 1024 + 1));
 const oversizedCache = await collectUsage({ codexHome, cacheFile, timezone: 'UTC', pricingData, maxCacheBytes: 1024 * 1024 });
