@@ -134,6 +134,9 @@ async function* walkJsonl(root) {
     return;
   }
   for await (const entry of dir) {
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
     const full = path.join(root, entry.name);
     if (entry.isDirectory()) {
       yield* walkJsonl(full);
