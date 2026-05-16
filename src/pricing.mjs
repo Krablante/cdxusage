@@ -39,6 +39,16 @@ const BUNDLED_STANDARD_PRICING = {
   'gpt-5': officialPrice(1.25, 0.125, 10),
   'gpt-5-mini': officialPrice(0.25, 0.025, 2),
   'gpt-5-nano': officialPrice(0.05, 0.005, 0.4),
+  'gpt-4.1': officialPrice(2, 0.5, 8),
+  'gpt-4.1-mini': officialPrice(0.4, 0.1, 1.6),
+  'gpt-4.1-nano': officialPrice(0.1, 0.025, 0.4),
+  'gpt-4o': officialPrice(2.5, 1.25, 10),
+  'gpt-4o-2024-11-20': officialPrice(2.5, 1.25, 10),
+  'gpt-4o-2024-08-06': officialPrice(2.5, 1.25, 10),
+  'gpt-4o-2024-05-13': officialPrice(5, 5, 15),
+  'gpt-4o-mini': officialPrice(0.15, 0.075, 0.6),
+  o3: officialPrice(2, 0.5, 8),
+  'o4-mini': officialPrice(1.1, 0.275, 4.4),
 };
 
 const BUNDLED_PRIORITY_PRICING = {

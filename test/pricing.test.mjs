@@ -201,12 +201,26 @@ const officialPriorityFallbackModels = [
   'o4-mini',
 ];
 for (const model of officialPriorityFallbackModels) {
-  assert.equal(bundledPriority.getPricing(model).missing, false, `${model} priority fallback should be bundled`);
+  const resolvedPriority = bundledPriority.getPricing(model);
+  assert.equal(resolvedPriority.missing, false, `${model} priority fallback should be bundled`);
+  assert.equal(
+    Boolean(resolvedPriority.price.priorityFallbackPrice),
+    true,
+    `${model} priority long-context exclusion should have standard fallback pricing`,
+  );
 }
 const bundledGpt4oMayPriority = bundledPriority.getPricing('gpt-4o-2024-05-13');
 assert.equal(bundledGpt4oMayPriority.price.inputCostPerMToken, 8.75);
 assert.equal(bundledGpt4oMayPriority.price.cachedInputCostPerMToken, 8.75);
 assert.equal(bundledGpt4oMayPriority.price.outputCostPerMToken, 26.25);
+assertClose(
+  calculateCostFromUsageOrEvents(
+    { inputTokens: 129_000, cachedInputTokens: 0, outputTokens: 1_000 },
+    bundledPriority.getPricing('gpt-4.1').price,
+    { version: 1, count: 1, totals: [129_000, 0, 1_000], over: { 128_000: [129_000, 0, 1_000], 272_000: [0, 0, 0] } },
+  ),
+  0.266,
+);
 
 const oldPriorityCacheFile = path.join(root, 'old-priority-cache.json');
 await writeFile(
