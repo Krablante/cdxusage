@@ -22,14 +22,18 @@ const STANDARD_LONG_CONTEXT_THRESHOLD_TOKENS = 272_000;
 const PRIORITY_LONG_CONTEXT_EXCLUSION_THRESHOLD_TOKENS = 128_000;
 const STANDARD_LONG_CONTEXT_TIERS = new Map([
   ['gpt-5.5', standardLongContextTiers(10, 1, 45)],
+  ['gpt-5.5-pro', standardLongContextTiers(60, 60, 270)],
   ['gpt-5.4', standardLongContextTiers(5, 0.5, 22.5)],
+  ['gpt-5.4-pro', standardLongContextTiers(60, 60, 270)],
 ]);
 
 const BUNDLED_STANDARD_PRICING = {
   'gpt-5.5': officialPrice(5, 0.5, 30),
+  'gpt-5.5-pro': officialPrice(30, null, 180),
   'gpt-5.4': officialPrice(2.5, 0.25, 15),
   'gpt-5.4-mini': officialPrice(0.75, 0.075, 4.5),
   'gpt-5.4-nano': officialPrice(0.2, 0.02, 1.25),
+  'gpt-5.4-pro': officialPrice(30, null, 180),
   'gpt-5.2': officialPrice(1.75, 0.175, 14),
   'gpt-5.2-codex': officialPrice(1.75, 0.175, 14),
   'gpt-5.3-codex': officialPrice(1.75, 0.175, 14),
@@ -183,21 +187,17 @@ export function parseOpenAIDevPricingHtml(html, options = {}) {
     }
   }
 
-  if (tier === 'standard') {
-    for (const component of components) {
-      if (component.exportName !== 'GroupedPricingTable') {
-        continue;
-      }
-      if (!component.props.includes('"Category"') || !component.props.includes('"Cached input"')) {
-        continue;
-      }
-      if (!component.props.includes('"ChatGPT"') && !component.props.includes('"Codex"')) {
-        continue;
-      }
-      if (component.props.includes('"Deep research"') && component.props.includes('"Embedding"')) {
-        addRowsFromProps(component.props, out, 'openai-official');
-      }
+  for (const component of components) {
+    if (component.exportName !== 'GroupedPricingTable') {
+      continue;
     }
+    if ((component.pane ?? (tier === 'standard' ? 'standard' : null)) !== tier) {
+      continue;
+    }
+    if (!isTokenGroupedPricingTable(component.props)) {
+      continue;
+    }
+    addRowsFromProps(component.props, out, tier === 'priority' ? 'openai-priority-official' : 'openai-official');
   }
 
   for (const [model, price] of Object.entries(out)) {
@@ -933,12 +933,25 @@ function extractAstroComponents(html) {
   const components = [];
   const re = /component-export="([^"]+)"[^>]*props="([^"]+)"/g;
   for (const match of html.matchAll(re)) {
+    const prefix = html.slice(Math.max(0, match.index - 5000), match.index);
+    const paneMatches = [...prefix.matchAll(/data-content-switcher-pane="true"\s+data-value="([^"]+)"/g)];
     components.push({
       exportName: match[1],
       props: decodeHtmlAttribute(match[2]),
+      pane: paneMatches.at(-1)?.[1] ?? null,
     });
   }
   return components;
+}
+
+function isTokenGroupedPricingTable(props) {
+  return (
+    props.includes('"Category"') &&
+    props.includes('"Model"') &&
+    props.includes('"Input"') &&
+    props.includes('"Cached input"') &&
+    props.includes('"Output"')
+  );
 }
 
 function readAstroStringField(props, field) {

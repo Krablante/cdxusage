@@ -36,6 +36,13 @@ assert.deepEqual(bundledGpt55Standard.price.tiered, [
   { kind: 'cache_read_input_token_cost', thresholdTokens: 272_000, costPerMToken: 1 },
   { kind: 'output_cost_per_token', thresholdTokens: 272_000, costPerMToken: 45 },
 ]);
+const bundledGpt55ProStandard = bundledStandard.getPricing('gpt-5.5-pro');
+assert.equal(bundledGpt55ProStandard.price.cachedInputCostPerMToken, 30);
+assert.deepEqual(bundledGpt55ProStandard.price.tiered, [
+  { kind: 'input_cost_per_token', thresholdTokens: 272_000, costPerMToken: 60 },
+  { kind: 'cache_read_input_token_cost', thresholdTokens: 272_000, costPerMToken: 60 },
+  { kind: 'output_cost_per_token', thresholdTokens: 272_000, costPerMToken: 270 },
+]);
 assert.deepEqual(bundledStandard.metadata.billingThresholds, [272_000]);
 assertClose(
   calculateCostFromUsageOrEvents(
@@ -51,12 +58,34 @@ assert.deepEqual(bundledGpt54Standard.price.tiered, [
   { kind: 'cache_read_input_token_cost', thresholdTokens: 272_000, costPerMToken: 0.5 },
   { kind: 'output_cost_per_token', thresholdTokens: 272_000, costPerMToken: 22.5 },
 ]);
+const bundledGpt54ProStandard = bundledStandard.getPricing('gpt-5.4-pro');
+assert.equal(bundledGpt54ProStandard.price.cachedInputCostPerMToken, 30);
+assert.deepEqual(bundledGpt54ProStandard.price.tiered, [
+  { kind: 'input_cost_per_token', thresholdTokens: 272_000, costPerMToken: 60 },
+  { kind: 'cache_read_input_token_cost', thresholdTokens: 272_000, costPerMToken: 60 },
+  { kind: 'output_cost_per_token', thresholdTokens: 272_000, costPerMToken: 270 },
+]);
 
 const parsedStandard = parseOpenAIDevPricingHtml(
   '<div component-export="TextTokenPricingTables" props="&quot;tier&quot;:[0,&quot;standard&quot;],[0,&quot;GPT-5.5&quot;],[0,5],[0,0.5],[0,30]"></div>',
   { tier: 'standard' },
 );
 assert.deepEqual(parsedStandard['gpt-5.5'].tiered, bundledGpt55Standard.price.tiered);
+
+const groupedPricingHtml = [
+  '<div data-content-switcher-pane="true" data-value="standard">',
+  '<astro-island component-export="GroupedPricingTable" props="&quot;headings&quot;:[1,[[0,&quot;Category&quot;],[0,&quot;Model&quot;],[0,&quot;Input&quot;],[0,&quot;Cached input&quot;],[0,&quot;Output&quot;]]],&quot;groups&quot;:[1,[[0,{&quot;model&quot;:[0,&quot;Codex&quot;],&quot;rows&quot;:[1,[[1,[[0,&quot;gpt-5.3-codex&quot;],[0,1.75],[0,0.175],[0,14]]]]]}]]]}"></astro-island>',
+  '</div>',
+  '<div data-content-switcher-pane="true" data-value="priority">',
+  '<astro-island component-export="GroupedPricingTable" props="&quot;headings&quot;:[1,[[0,&quot;Category&quot;],[0,&quot;Model&quot;],[0,&quot;Input&quot;],[0,&quot;Cached input&quot;],[0,&quot;Output&quot;]]],&quot;groups&quot;:[1,[[0,{&quot;model&quot;:[0,&quot;Codex&quot;],&quot;rows&quot;:[1,[[1,[[0,&quot;gpt-5.3-codex&quot;],[0,3.5],[0,0.35],[0,28]]]]]}]]]}"></astro-island>',
+  '</div>',
+].join('');
+const parsedGroupedStandard = parseOpenAIDevPricingHtml(groupedPricingHtml, { tier: 'standard' });
+assert.equal(parsedGroupedStandard['gpt-5.3-codex'].inputCostPerMToken, 1.75);
+const parsedGroupedPriority = parseOpenAIDevPricingHtml(groupedPricingHtml, { tier: 'priority' });
+assert.equal(parsedGroupedPriority['gpt-5.3-codex'].inputCostPerMToken, 3.5);
+assert.equal(parsedGroupedPriority['gpt-5.3-codex'].cachedInputCostPerMToken, 0.35);
+assert.equal(parsedGroupedPriority['gpt-5.3-codex'].outputCostPerMToken, 28);
 
 const oldOpenAiCacheFile = path.join(root, 'old-openai-cache.json');
 await writeFile(
