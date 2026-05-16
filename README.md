@@ -168,15 +168,17 @@ Recent local sanity check on a large Codex archive:
 | Tool | Scenario | Time | RSS | Result |
 | --- | --- | ---: | ---: | --- |
 | `@ccusage/codex@18.0.11` | `--since 2026-05-01`, timeout 25s | `>25.01s` | n/a | timed out |
-| `cdxusage` | same filter, cold | `3.63s` | `173784KB` | complete |
-| `cdxusage` | same filter, warm | `0.24s` | `96856KB` | complete |
+| `cdxusage` | same filter, cold full scan | `36.57s` | `359440KB` | complete |
+| `cdxusage` | same filter, warm cached | `0.43s` | `150960KB` | complete |
 
-Compared with upstream's bounded timeout, this run was at least 85.5% faster
-cold and 99.0% faster warm. Upstream did not complete in the timeout window, so
-upstream RSS is not comparable for this real-profile check.
+The cold path scans every matching JSONL file for correctness, including
+long-lived resumed sessions whose events may fall far outside the session path
+date. The warm cached path was at least 98.3% faster than upstream's bounded
+timeout in this run. Upstream did not complete in the timeout window, so
+upstream final RSS is not comparable for this real-profile check.
 
 Live pricing status from a fresh check: OpenAI official + bundled fallback,
-`modelCount: 63`. Non-OpenAI routes, if present in local Codex logs, are left
+`modelCount: 65`. Non-OpenAI routes, if present in local Codex logs, are left
 unpriced and reported in `pricing.missingModels`.
 
 ## Verification

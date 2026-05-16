@@ -1,6 +1,6 @@
 {
   "name": "cdxusage",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "description": "Fast Codex usage, token, and estimated cost CLI.",
   "bin": {
