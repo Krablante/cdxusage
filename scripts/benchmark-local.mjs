@@ -127,7 +127,7 @@ function printRows(rows) {
   console.log('| --- | ---: | ---: | --- |');
   for (const row of rows) {
     const time = row.timedOut ? `>${row.wallSeconds.toFixed(2)}s` : `${row.wallSeconds.toFixed(2)}s`;
-    const ram = row.maxRssKb == null ? 'n/a' : `${(row.maxRssKb / 1024 / 1024).toFixed(2)} GB`;
+    const ram = row.maxRssKb == null ? 'n/a' : `${(row.maxRssKb / 1_000_000).toFixed(2)} GB`;
     const result = row.timedOut ? `timed out (${row.status})` : row.status === 0 ? 'complete' : `exit ${row.status}`;
     console.log(`| ${row.label} | ${time} | ${ram} | ${result} |`);
   }

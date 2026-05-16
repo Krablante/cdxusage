@@ -102,19 +102,24 @@ export async function collectUsage(options = {}) {
   const report = buildReport(aggregate, stats, nextFiles);
 
   if (saveCache) {
-    const saveResult = await saveCacheFile(cacheFile, {
-      version: CACHE_VERSION,
-      source: CACHE_SOURCE,
-      timezone,
-      billingThresholds,
-      updatedAt: new Date().toISOString(),
-      files: nextFiles,
-    }, maxCacheBytes);
-    report.stats.cacheBytes = saveResult.bytes;
-    report.stats.cacheSaveSkippedBySize = !saveResult.saved;
-    if (saveResult.saved) {
-      report.stats.cacheFile = cacheFile;
-      report.stats.cacheEntriesSaved = Object.keys(nextFiles).length;
+    try {
+      const saveResult = await saveCacheFile(cacheFile, {
+        version: CACHE_VERSION,
+        source: CACHE_SOURCE,
+        timezone,
+        billingThresholds,
+        updatedAt: new Date().toISOString(),
+        files: nextFiles,
+      }, maxCacheBytes);
+      report.stats.cacheBytes = saveResult.bytes;
+      report.stats.cacheSaveSkippedBySize = !saveResult.saved;
+      if (saveResult.saved) {
+        report.stats.cacheFile = cacheFile;
+        report.stats.cacheEntriesSaved = Object.keys(nextFiles).length;
+      }
+    } catch (error) {
+      report.stats.cacheSaveSkippedByError = true;
+      report.stats.cacheSaveError = error?.message ?? String(error);
     }
   } else {
     report.stats.cacheSaveSkippedBySize = false;
@@ -782,6 +787,8 @@ function createStats(cache, timezone, billingThresholds = DEFAULT_BILLING_THRESH
     bytesSkippedByTailCache: 0,
     cacheEntriesLoaded: Object.keys(cache.files).length,
     cacheEntriesSaved: 0,
+    cacheSaveSkippedByError: false,
+    cacheSaveError: null,
     discoveryMode: null,
   };
 }

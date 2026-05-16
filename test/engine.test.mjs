@@ -249,6 +249,38 @@ assert.equal(saveCap.stats.cacheSaveSkippedBySize, true);
 assert.equal(saveCap.stats.cacheEntriesSaved, 0);
 assert.equal(saveCap.totals.totalTokens, 7000);
 
+const blockedCacheHome = path.join(root, 'blocked-cache-codex-home');
+const blockedCacheSessions = path.join(blockedCacheHome, 'sessions/2026/05/16');
+await mkdir(blockedCacheSessions, { recursive: true });
+await writeFile(
+  path.join(blockedCacheSessions, 'blocked-cache.jsonl'),
+  [
+    JSON.stringify({ timestamp: '2026-05-16T00:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-test' } }),
+    JSON.stringify({
+      timestamp: '2026-05-16T00:00:01.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 3, cached_input_tokens: 1, output_tokens: 2, total_tokens: 5 } },
+      },
+    }),
+    '',
+  ].join('\n'),
+);
+const cachePathBlocker = path.join(root, 'cache-path-blocker');
+await writeFile(cachePathBlocker, 'not a directory');
+const blockedCacheReport = await collectUsage({
+  codexHome: blockedCacheHome,
+  cacheFile: path.join(cachePathBlocker, 'index.json'),
+  timezone: 'UTC',
+  includePricing: false,
+});
+assert.equal(blockedCacheReport.totals.totalTokens, 5);
+assert.equal(blockedCacheReport.stats.cacheSaveSkippedByError, true);
+assert.match(blockedCacheReport.stats.cacheSaveError, /EEXIST|ENOTDIR|not a directory/i);
+assert.equal(blockedCacheReport.stats.cacheEntriesSaved, 0);
+assert.equal(blockedCacheReport.stats.cacheFile, null);
+
 assert.throws(() => normalizeDate('2026-02-30'), /Invalid date/);
 assert.throws(() => normalizeDate('2026-99-99'), /Invalid date/);
 

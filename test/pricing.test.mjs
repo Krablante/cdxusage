@@ -348,6 +348,31 @@ try {
   globalThis.fetch = officialPriorityFetch;
 }
 
+const cacheSaveFailureFetch = globalThis.fetch;
+const pricingCachePathBlocker = path.join(root, 'pricing-cache-path-blocker');
+await writeFile(pricingCachePathBlocker, 'not a directory');
+globalThis.fetch = async () => ({
+  ok: true,
+  text: async () => `
+    <div component-export="TextTokenPricingTables" props="&quot;tier&quot;:[0,&quot;standard&quot;],[0,&quot;gpt-live-cache-fail&quot;],[0,9],[0,0.9],[0,18]"></div>
+  `,
+});
+try {
+  const cacheSaveFailureCatalog = await loadPricingCatalog({
+    cacheFile: path.join(pricingCachePathBlocker, 'pricing.json'),
+    ttlMs: 0,
+    fetchTimeoutMs: 1000,
+  });
+  assert.equal(cacheSaveFailureCatalog.metadata.cacheState, 'created-cache-save-failed');
+  assert.match(cacheSaveFailureCatalog.metadata.cacheSaveError, /EEXIST|ENOTDIR|not a directory/i);
+  const livePriceAfterCacheSaveFailure = cacheSaveFailureCatalog.getPricing('gpt-live-cache-fail');
+  assert.equal(livePriceAfterCacheSaveFailure.missing, false);
+  assert.equal(livePriceAfterCacheSaveFailure.detail.source, 'openai-official');
+  assert.equal(livePriceAfterCacheSaveFailure.price.inputCostPerMToken, 9);
+} finally {
+  globalThis.fetch = cacheSaveFailureFetch;
+}
+
 const tierFallbackCatalog = await loadPricingCatalog({
   tier: 'priority',
   pricingData: {

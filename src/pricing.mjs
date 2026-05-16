@@ -143,17 +143,25 @@ export async function loadPricingCatalog(options = {}) {
 
   try {
     const fetched = await fetchLivePricing({ tier, timeoutMs: options.fetchTimeoutMs, priorityModels });
-    await savePricingCache(cacheFile, fetched);
+    let cacheState = cached ? 'refreshed' : 'created';
+    let cacheSaveError = null;
+    try {
+      await savePricingCache(cacheFile, fetched);
+    } catch (error) {
+      cacheState = cached ? 'refreshed-cache-save-failed' : 'created-cache-save-failed';
+      cacheSaveError = error?.message ?? String(error);
+    }
     return createCatalog(fetched.data, {
       source: fetched.source,
       sourceUrl: fetched.sourceUrl,
       fetchedAt: fetched.fetchedAt,
       cacheFile,
-      cacheState: cached ? 'refreshed' : 'created',
+      cacheState,
       ttlHours: ttlMs / 3_600_000,
       modelCount: Object.keys(fetched.data).length,
       tier,
       priorityModels,
+      cacheSaveError,
     });
   } catch (error) {
     const source = cachedForTier?.data ?? bundledPricingData(tier, { priorityModels });
