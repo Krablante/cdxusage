@@ -44,16 +44,21 @@ cd cdxusage
 node ./bin/cdxusage.mjs monthly
 ```
 
-Useful reports. These examples assume `cdxusage` is installed or you are inside
-a clone; for one-off GitHub runs, replace `cdxusage` with
-`npx -y github:Krablante/cdxusage`.
+Useful one-off reports:
 
 ```bash
-cdxusage daily
-cdxusage monthly
-cdxusage session
-cdxusage monthly --json --include-stats
-cdxusage session --since 2026-05-01 --sort cost --order desc
+npx -y github:Krablante/cdxusage daily
+npx -y github:Krablante/cdxusage monthly
+npx -y github:Krablante/cdxusage session
+npx -y github:Krablante/cdxusage monthly --json --include-stats
+npx -y github:Krablante/cdxusage session --since 2026-05-01 --sort cost --order desc
+```
+
+Inside a clone, use the local entry point:
+
+```bash
+node ./bin/cdxusage.mjs daily
+node ./bin/cdxusage.mjs monthly --json --include-stats
 ```
 
 ## What You Get

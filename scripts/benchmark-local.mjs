@@ -83,27 +83,37 @@ async function measure(label, command, commandArgs, timeoutSeconds) {
   const finalArgs = hasTime
     ? ['-v', 'timeout', `${timeoutSeconds}s`, command, ...commandArgs]
     : commandArgs;
-  const result = await run(finalCommand, finalArgs);
+  const result = await run(finalCommand, finalArgs, timeoutSeconds);
   const wallSeconds = Number(process.hrtime.bigint() - start) / 1_000_000_000;
   const maxRssKb = parseMaxRss(result.stderr);
   return {
     label,
-    status: result.status,
-    timedOut: result.status === 124,
+    status: result.timedOut ? 124 : result.status,
+    timedOut: result.timedOut || result.status === 124,
     wallSeconds,
     maxRssKb,
   };
 }
 
-function run(command, args) {
+function run(command, args, timeoutSeconds) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: repoRoot, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+      setTimeout(() => child.kill('SIGKILL'), 1_000).unref();
+    }, Math.ceil(timeoutSeconds * 1000) + 500);
+    timer.unref();
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk) => {
       stderr += chunk;
     });
-    child.on('close', (status) => resolve({ status, stderr }));
+    child.on('close', (status, signal) => {
+      clearTimeout(timer);
+      resolve({ status, signal, stderr, timedOut });
+    });
   });
 }
 
