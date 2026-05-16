@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { main, parseArgs } from '../src/cli.mjs';
+import { VERSION, main, parseArgs } from '../src/cli.mjs';
 
 const root = path.join(tmpdir(), `cdxusage-cli-${process.pid}`);
 const codexHome = path.join(root, 'codex-home');
@@ -10,6 +10,7 @@ const sessionsDir = path.join(codexHome, 'sessions/2026/05/16');
 const file = path.join(sessionsDir, 'rollout-2026-05-16T00-00-00-compat.jsonl');
 const cacheFile = path.join(root, 'cache/index.json');
 const pricingCacheFile = path.join(root, 'cache/pricing.json');
+const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
 await rm(root, { recursive: true, force: true });
 await mkdir(sessionsDir, { recursive: true });
@@ -38,6 +39,7 @@ await writeFile(
   ].join('\n'),
 );
 
+assert.equal(VERSION, packageJson.version);
 assert.equal(parseArgs(['monthly', '--json']).command, 'monthly');
 assert.equal(parseArgs(['sessions']).command, 'sessions');
 assert.equal(parseArgs(['monthly']).speed, 'auto');

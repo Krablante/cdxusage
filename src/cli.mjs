@@ -5,7 +5,7 @@ import { collectUsage, defaultCacheFile, normalizeDate, safeTimeZone } from './e
 import { DEFAULT_LOCALE, DEFAULT_TIMEZONE, formatDisplayDate, formatDisplayMonth, toPublicModels, toPublicUsage } from './format.mjs';
 import { renderReportTable } from './table.mjs';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 
 const COMMANDS = new Set(['daily', 'monthly', 'session', 'sessions']);
 const DEFAULT_AUTO_PRIORITY_MODELS = Object.freeze(['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5']);

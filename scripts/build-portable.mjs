@@ -26,6 +26,8 @@ await cp(
   { force: true },
 );
 await normalizePortableTree(path.join(portableRoot, 'docs'));
+await cp(path.join(repoRoot, 'LICENSE'), path.join(portableRoot, 'LICENSE'), { force: true });
+await chmod(path.join(portableRoot, 'LICENSE'), 0o644);
 
 const sourcePackage = JSON.parse(await readFile(path.join(repoRoot, 'package.json'), 'utf8'));
 const portablePackage = {
