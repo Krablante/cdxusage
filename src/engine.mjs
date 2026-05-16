@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { finished } from 'node:stream/promises';
 import path from 'node:path';
@@ -449,7 +449,6 @@ function createFileScan(initialState = undefined, scannerMode = 'needle') {
       linesSeen: 0,
       candidateLinesSeen: 0,
       linesParsed: 0,
-      linesFastParsed: 0,
       linesJsonParsed: 0,
       tokenEvents: 0,
     },
@@ -663,8 +662,6 @@ async function scanFileRange(
   sourceBytes = undefined,
 ) {
   const scan = createFileScan(initialState, process.env.CDXUSAGE_SCAN_MODE === 'line' ? 'line' : 'needle');
-  let carry = Buffer.alloc(0);
-  let lastByte;
 
   if (process.env.CDXUSAGE_SCAN_MODE === 'grep' && start === 0) {
     scan.stats.scannerMode = 'grep';
@@ -876,7 +873,6 @@ function parseTokenLineJson(line) {
   }
   const info = entry.payload.info ?? {};
   return {
-    fast: false,
     timestamp: entry.timestamp,
     model: extractModel(entry.payload, info),
     lastUsage: normalizeRawUsage(info.last_token_usage),
@@ -908,11 +904,7 @@ function processLine(line, context) {
   if (!parsed) {
     return;
   }
-  if (parsed.fast) {
-    scan.stats.linesFastParsed += 1;
-  } else {
-    scan.stats.linesJsonParsed += 1;
-  }
+  scan.stats.linesJsonParsed += 1;
   scan.stats.linesParsed += 1;
   const lastUsage = parsed.lastUsage;
   const totalUsage = parsed.totalUsage;
@@ -1155,7 +1147,6 @@ function mergeEntries(base, tail) {
       linesSeen: (base.stats?.linesSeen ?? 0) + tail.stats.linesSeen,
       candidateLinesSeen: (base.stats?.candidateLinesSeen ?? 0) + (tail.stats.candidateLinesSeen ?? 0),
       linesParsed: (base.stats?.linesParsed ?? 0) + tail.stats.linesParsed,
-      linesFastParsed: (base.stats?.linesFastParsed ?? 0) + (tail.stats.linesFastParsed ?? 0),
       linesJsonParsed: (base.stats?.linesJsonParsed ?? 0) + (tail.stats.linesJsonParsed ?? 0),
       tokenEvents: (base.stats?.tokenEvents ?? 0) + tail.stats.tokenEvents,
       nativeOutputBytes: (base.stats?.nativeOutputBytes ?? 0) + (tail.stats.nativeOutputBytes ?? 0),
@@ -1190,7 +1181,6 @@ function createStats(cache, timezone, billingThresholds = DEFAULT_BILLING_THRESH
     linesSeen: 0,
     candidateLinesSeen: 0,
     linesParsed: 0,
-    linesFastParsed: 0,
     linesJsonParsed: 0,
     tokenEvents: 0,
     bytesSeen: 0,
@@ -1486,7 +1476,6 @@ function addScanStats(target, scanStats) {
   target.linesSeen += scanStats.linesSeen;
   target.candidateLinesSeen += scanStats.candidateLinesSeen ?? 0;
   target.linesParsed += scanStats.linesParsed;
-  target.linesFastParsed += scanStats.linesFastParsed ?? 0;
   target.linesJsonParsed += scanStats.linesJsonParsed ?? 0;
   target.tokenEvents += scanStats.tokenEvents;
   target.nativeOutputBytes += scanStats.nativeOutputBytes ?? 0;
