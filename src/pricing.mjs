@@ -7,7 +7,7 @@ const PRICING_CACHE_VERSION = 1;
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_FETCH_TIMEOUT_MS = 5_000;
 const OPENAI_PRICING_URL = 'https://developers.openai.com/api/docs/pricing';
-const OPENAI_PRIORITY_PROCESSING_URL = 'https://openai.com/api-priority-processing/';
+const OPENAI_PRIORITY_PROCESSING_URL = 'https://developers.openai.com/api/docs/guides/priority-processing';
 const DEFAULT_PRICING_CACHE_FILE = path.join(
   process.env.XDG_CACHE_HOME || path.join(homedir(), '.cache'),
   'cdxusage/pricing-v1.json',
@@ -56,6 +56,8 @@ const BUNDLED_PRIORITY_PRICING = {
   'gpt-5.4': officialPriorityPrice(5, 0.5, 30),
   'gpt-5.4-mini': officialPriorityPrice(1.5, 0.15, 9),
   'gpt-5.2': officialPriorityPrice(3.5, 0.35, 28),
+  'gpt-5.2-codex': officialPriorityPrice(3.5, 0.35, 28),
+  'gpt-5.3-codex': officialPriorityPrice(3.5, 0.35, 28),
   'gpt-5.1': officialPriorityPrice(2.5, 0.25, 20),
   'gpt-5.1-codex': officialPriorityPrice(2.5, 0.25, 20),
   'gpt-5-codex': officialPriorityPrice(2.5, 0.25, 20),

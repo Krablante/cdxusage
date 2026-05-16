@@ -61,6 +61,10 @@ node ./bin/cdxusage.mjs daily
 node ./bin/cdxusage.mjs monthly --json --include-stats
 ```
 
+Later examples use `cdxusage` as shorthand for your chosen entry point:
+global install, `npx -y github:Krablante/cdxusage`, or
+`node ./bin/cdxusage.mjs` inside a clone.
+
 ## What You Get
 
 - `daily`, `monthly`, `session`, and `sessions` alias

@@ -184,6 +184,8 @@ const officialPriorityFallbackModels = [
   'gpt-5.4',
   'gpt-5.4-mini',
   'gpt-5.2',
+  'gpt-5.2-codex',
+  'gpt-5.3-codex',
   'gpt-5.1',
   'gpt-5',
   'gpt-5-mini',
@@ -213,6 +215,10 @@ const bundledGpt4oMayPriority = bundledPriority.getPricing('gpt-4o-2024-05-13');
 assert.equal(bundledGpt4oMayPriority.price.inputCostPerMToken, 8.75);
 assert.equal(bundledGpt4oMayPriority.price.cachedInputCostPerMToken, 8.75);
 assert.equal(bundledGpt4oMayPriority.price.outputCostPerMToken, 26.25);
+const bundledGpt53CodexPriority = bundledPriority.getPricing('gpt-5.3-codex');
+assert.equal(bundledGpt53CodexPriority.price.inputCostPerMToken, 3.5);
+assert.equal(bundledGpt53CodexPriority.price.cachedInputCostPerMToken, 0.35);
+assert.equal(bundledGpt53CodexPriority.price.outputCostPerMToken, 28);
 assertClose(
   calculateCostFromUsageOrEvents(
     { inputTokens: 129_000, cachedInputTokens: 0, outputTokens: 1_000 },
@@ -220,6 +226,14 @@ assertClose(
     { version: 1, count: 1, totals: [129_000, 0, 1_000], over: { 128_000: [129_000, 0, 1_000], 272_000: [0, 0, 0] } },
   ),
   0.266,
+);
+assertClose(
+  calculateCostFromUsageOrEvents(
+    { inputTokens: 129_000, cachedInputTokens: 0, outputTokens: 1_000 },
+    bundledGpt53CodexPriority.price,
+    { version: 1, count: 1, totals: [129_000, 0, 1_000], over: { 128_000: [129_000, 0, 1_000], 272_000: [0, 0, 0] } },
+  ),
+  0.23975,
 );
 
 const oldPriorityCacheFile = path.join(root, 'old-priority-cache.json');
