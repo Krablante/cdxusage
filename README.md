@@ -188,8 +188,9 @@ Compared with upstream's bounded timeout, real-profile cold output is at least
 complete in the timeout window, so real-profile upstream RSS is not comparable;
 the completed controlled fixture above is the RSS comparison.
 
-Live pricing status from the same check: OpenAI official + bundled fallback,
-`modelCount: 63`, `missingModels: []`.
+Live pricing status from a fresh check: OpenAI official + bundled fallback,
+`modelCount: 63`. Non-OpenAI routes, if present in local Codex logs, are left
+unpriced and reported in `pricing.missingModels`.
 
 ## Verification
 
