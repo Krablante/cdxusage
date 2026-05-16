@@ -44,7 +44,9 @@ cd cdxusage
 node ./bin/cdxusage.mjs monthly
 ```
 
-Useful reports:
+Useful reports. These examples assume `cdxusage` is installed or you are inside
+a clone; for one-off GitHub runs, replace `cdxusage` with
+`npx -y github:Krablante/cdxusage`.
 
 ```bash
 cdxusage daily
@@ -114,9 +116,10 @@ Pricing sources are intentionally OpenAI-only:
 2. live OpenAI Priority Processing pricing
 3. bundled OpenAI/Codex fallback snapshot
 
-Known official long-context uplifts are applied when needed. For example,
+Known official long-context rules are applied when needed. For example,
 standard GPT-5.5 and GPT-5.4 sessions above 272K input tokens use OpenAI's
-long-context rates.
+long-context rates, while priority pricing falls back to standard pricing for
+long-context requests that OpenAI excludes from Priority Processing.
 
 Non-OpenAI model routes are not guessed. They are reported in
 `pricing.missingModels` when stats are enabled.

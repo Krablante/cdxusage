@@ -253,7 +253,8 @@ function sameBillingThresholds(left, right) {
 }
 
 function billingSummarySupportsPrice(events, price) {
-  if (!usesTierPricing(price)) {
+  const thresholds = billingThresholdsForPrice(price);
+  if (thresholds.length === 0) {
     return true;
   }
   if (!events) {
@@ -265,7 +266,7 @@ function billingSummarySupportsPrice(events, price) {
   if (!events.over || !Array.isArray(events.totals)) {
     return false;
   }
-  return price.tiered.every((tier) => Array.isArray(events.over[tier.thresholdTokens]));
+  return thresholds.every((threshold) => Array.isArray(events.over[threshold]));
 }
 
 function markPricingSkipped(report) {
@@ -1334,7 +1335,25 @@ function roundRatio(value) {
 }
 
 function usesTierPricing(price) {
-  return Array.isArray(price?.tiered) && price.tiered.length > 0;
+  return billingThresholdsForPrice(price).length > 0;
+}
+
+function billingThresholdsForPrice(price) {
+  const thresholds = new Set();
+  if (Number.isFinite(price?.priorityExcludedAboveInputTokens) && price.priorityExcludedAboveInputTokens > 0) {
+    thresholds.add(Math.trunc(price.priorityExcludedAboveInputTokens));
+  }
+  for (const tier of price?.tiered ?? []) {
+    if (Number.isFinite(tier.thresholdTokens) && tier.thresholdTokens > 0) {
+      thresholds.add(Math.trunc(tier.thresholdTokens));
+    }
+  }
+  for (const tier of price?.priorityFallbackPrice?.tiered ?? []) {
+    if (Number.isFinite(tier.thresholdTokens) && tier.thresholdTokens > 0) {
+      thresholds.add(Math.trunc(tier.thresholdTokens));
+    }
+  }
+  return [...thresholds].sort((a, b) => a - b);
 }
 
 function dedupeAliases(values) {

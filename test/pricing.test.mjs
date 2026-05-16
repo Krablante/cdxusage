@@ -141,7 +141,44 @@ assert.equal(bundledGpt55Priority.price.inputCostPerMToken, 12.5);
 assert.equal(bundledGpt55Priority.price.cachedInputCostPerMToken, 1.25);
 assert.equal(bundledGpt55Priority.price.outputCostPerMToken, 75);
 assert.equal(bundledGpt55Priority.price.tiered, undefined);
+assert.equal(bundledGpt55Priority.price.priorityExcludedAboveInputTokens, 128_000);
+assert.deepEqual(bundledGpt55Priority.price.priorityFallbackPrice.tiered, bundledGpt55Standard.price.tiered);
+assert.deepEqual(bundledPriority.metadata.billingThresholds, [128_000, 272_000]);
 assert.equal(bundledGpt55Priority.detail.source, 'openai-priority-official-bundled');
+assert.equal(bundledGpt55Priority.detail.priorityExcludedAboveInputTokens, 128_000);
+assertClose(
+  calculateCostFromUsageOrEvents(
+    { inputTokens: 100_000, cachedInputTokens: 0, outputTokens: 1_000 },
+    bundledGpt55Priority.price,
+    { version: 1, count: 1, totals: [100_000, 0, 1_000], over: { 128_000: [0, 0, 0], 272_000: [0, 0, 0] } },
+  ),
+  1.325,
+);
+assertClose(
+  calculateCostFromUsageOrEvents(
+    { inputTokens: 150_000, cachedInputTokens: 0, outputTokens: 1_000 },
+    bundledGpt55Priority.price,
+    { version: 1, count: 1, totals: [150_000, 0, 1_000], over: { 128_000: [150_000, 0, 1_000], 272_000: [0, 0, 0] } },
+  ),
+  0.78,
+);
+assertClose(
+  calculateCostFromUsageOrEvents(
+    { inputTokens: 300_000, cachedInputTokens: 100_000, outputTokens: 10_000 },
+    bundledGpt55Priority.price,
+    {
+      version: 1,
+      count: 1,
+      totals: [200_000, 100_000, 10_000],
+      over: { 128_000: [200_000, 100_000, 10_000], 272_000: [200_000, 100_000, 10_000] },
+    },
+  ),
+  2.55,
+);
+assertClose(
+  calculateCostUSD({ inputTokens: 300_000, cachedInputTokens: 100_000, outputTokens: 10_000 }, bundledGpt55Priority.price),
+  2.55,
+);
 const officialPriorityFallbackModels = [
   'gpt-5.5',
   'gpt-5.4',
@@ -170,6 +207,32 @@ const bundledGpt4oMayPriority = bundledPriority.getPricing('gpt-4o-2024-05-13');
 assert.equal(bundledGpt4oMayPriority.price.inputCostPerMToken, 8.75);
 assert.equal(bundledGpt4oMayPriority.price.cachedInputCostPerMToken, 8.75);
 assert.equal(bundledGpt4oMayPriority.price.outputCostPerMToken, 26.25);
+
+const oldPriorityCacheFile = path.join(root, 'old-priority-cache.json');
+await writeFile(
+  oldPriorityCacheFile,
+  `${JSON.stringify({
+    version: 1,
+    source: 'openai-priority-official',
+    sourceUrl: 'https://developers.openai.com/api/docs/pricing',
+    fetchedAt: new Date().toISOString(),
+    tier: 'priority',
+    data: {
+      'gpt-5.5': {
+        inputCostPerMToken: 12.5,
+        cachedInputCostPerMToken: 1.25,
+        outputCostPerMToken: 75,
+        source: 'openai-priority-official',
+        sourceUrl: 'https://developers.openai.com/api/docs/pricing',
+        serviceTier: 'priority',
+        tierAdjusted: true,
+      },
+    },
+  })}\n`,
+);
+const oldPriorityCacheCatalog = await loadPricingCatalog({ tier: 'priority', offline: true, cacheFile: oldPriorityCacheFile });
+assert.equal(oldPriorityCacheCatalog.getPricing('gpt-5.5').price.priorityExcludedAboveInputTokens, 128_000);
+assert.deepEqual(oldPriorityCacheCatalog.getPricing('gpt-5.5').price.priorityFallbackPrice.tiered, bundledGpt55Standard.price.tiered);
 
 const scopedPriority = await loadPricingCatalog({
   tier: 'priority',

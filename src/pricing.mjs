@@ -19,6 +19,7 @@ const CODEX_MODEL_ALIASES = new Map([
 ]);
 
 const STANDARD_LONG_CONTEXT_THRESHOLD_TOKENS = 272_000;
+const PRIORITY_LONG_CONTEXT_EXCLUSION_THRESHOLD_TOKENS = 128_000;
 const STANDARD_LONG_CONTEXT_TIERS = new Map([
   ['gpt-5.5', standardLongContextTiers(10, 1, 45)],
   ['gpt-5.4', standardLongContextTiers(5, 0.5, 22.5)],
@@ -198,8 +199,11 @@ export function parseOpenAIDevPricingHtml(html, options = {}) {
 export function calculateCostUSD(usage, price) {
   const inputTokens = finiteNumber(usage.inputTokens);
   const cachedInputTokens = Math.min(finiteNumber(usage.cachedInputTokens), inputTokens);
-  const nonCachedInputTokens = Math.max(inputTokens - cachedInputTokens, 0);
   const outputTokens = finiteNumber(usage.outputTokens);
+  if (requiresEventPricing(price)) {
+    return calculateEventCostUSD([inputTokens, cachedInputTokens, outputTokens], price);
+  }
+  const nonCachedInputTokens = Math.max(inputTokens - cachedInputTokens, 0);
 
   return (
     (nonCachedInputTokens / MILLION) * price.inputCostPerMToken +
@@ -227,6 +231,26 @@ function calculateCostFromBillingSummary(usage, price, summary) {
   if (!summary || !Array.isArray(summary.totals)) {
     return calculateCostUSD(usage, price);
   }
+  if (hasPriorityFallback(price)) {
+    const threshold = price.priorityExcludedAboveInputTokens;
+    const excluded = summary.over?.[threshold];
+    if (Array.isArray(excluded)) {
+      const included = summary.totals.map((value, index) => Math.max(finiteNumber(value) - finiteNumber(excluded[index]), 0));
+      const priorityCost = calculateSummaryCost({ totals: included, over: summary.over }, price);
+      const fallbackCost = calculateSummaryCost({ totals: excluded, over: summary.over }, price.priorityFallbackPrice);
+      if (priorityCost != null && fallbackCost != null) {
+        return priorityCost + fallbackCost;
+      }
+    }
+  }
+  const cost = calculateSummaryCost(summary, price);
+  if (cost == null) {
+    return calculateCostUSD(usage, price);
+  }
+  return cost;
+}
+
+function calculateSummaryCost(summary, price) {
   const inputCost = calculateTieredTokenCostFromSummary(
     finiteNumber(summary.totals[0]),
     summary,
@@ -252,7 +276,7 @@ function calculateCostFromBillingSummary(usage, price, summary) {
     'output_cost_per_token',
   );
   if (inputCost == null || cachedCost == null || outputCost == null) {
-    return calculateCostUSD(usage, price);
+    return null;
   }
   return inputCost + cachedCost + outputCost;
 }
@@ -260,6 +284,9 @@ function calculateCostFromBillingSummary(usage, price, summary) {
 function calculateEventCostUSD(event, price) {
   const inputTokens = finiteNumber(event[0]);
   const cachedInputTokens = Math.min(finiteNumber(event[1]), inputTokens);
+  if (shouldUsePriorityFallback(inputTokens, price)) {
+    return calculateEventCostUSD([inputTokens, cachedInputTokens, event[2]], price.priorityFallbackPrice);
+  }
   const nonCachedInputTokens = Math.max(inputTokens - cachedInputTokens, 0);
   const outputTokens = finiteNumber(event[2]);
   const summary = {
@@ -324,6 +351,18 @@ function tierThresholds(tiers) {
   return [...new Set((tiers ?? []).map((tier) => tier.thresholdTokens).filter((value) => Number.isFinite(value)))].sort(
     (a, b) => a - b,
   );
+}
+
+function hasPriorityFallback(price) {
+  return Number.isFinite(price?.priorityExcludedAboveInputTokens) && price.priorityFallbackPrice;
+}
+
+function shouldUsePriorityFallback(inputTokens, price) {
+  return hasPriorityFallback(price) && finiteNumber(inputTokens) > price.priorityExcludedAboveInputTokens;
+}
+
+function requiresEventPricing(price) {
+  return hasPriorityFallback(price) || (Array.isArray(price?.tiered) && price.tiered.length > 0);
 }
 
 function contextOverThreshold(inputTokens, cachedInputTokens, outputTokens, threshold) {
@@ -449,17 +488,48 @@ function withKnownPricingAdjustments(data) {
     const adjusted = {
       ...price,
       tiered: Array.isArray(price?.tiered) ? price.tiered.map((tier) => ({ ...tier })) : undefined,
+      priorityFallbackPrice: cloneFallbackPrice(price?.priorityFallbackPrice),
     };
     addKnownStandardLongContextTiers(model, adjusted);
+    addKnownPriorityExclusionFallback(model, adjusted);
     out[model] = adjusted;
   }
   return out;
 }
 
+function cloneFallbackPrice(price) {
+  if (!price || typeof price !== 'object') {
+    return null;
+  }
+  const cloned = {
+    ...price,
+    tiered: Array.isArray(price.tiered) ? price.tiered.map((tier) => ({ ...tier })) : undefined,
+  };
+  delete cloned.priorityExcludedAboveInputTokens;
+  delete cloned.priorityFallbackPrice;
+  return cloned;
+}
+
+function addKnownPriorityExclusionFallback(model, price) {
+  if (!model || !price?.tierAdjusted) {
+    return;
+  }
+  price.priorityExcludedAboveInputTokens ??= PRIORITY_LONG_CONTEXT_EXCLUSION_THRESHOLD_TOKENS;
+  price.priorityFallbackPrice ??= bundledStandardFallbackPrice(model);
+}
+
 function pricingBillingThresholds(data) {
   const thresholds = new Set();
   for (const price of Object.values(data ?? {})) {
+    if (Number.isFinite(price?.priorityExcludedAboveInputTokens) && price.priorityExcludedAboveInputTokens > 0) {
+      thresholds.add(Math.trunc(price.priorityExcludedAboveInputTokens));
+    }
     for (const tier of price?.tiered ?? []) {
+      if (Number.isFinite(tier.thresholdTokens) && tier.thresholdTokens > 0) {
+        thresholds.add(Math.trunc(tier.thresholdTokens));
+      }
+    }
+    for (const tier of price?.priorityFallbackPrice?.tiered ?? []) {
       if (Number.isFinite(tier.thresholdTokens) && tier.thresholdTokens > 0) {
         thresholds.add(Math.trunc(tier.thresholdTokens));
       }
@@ -475,9 +545,16 @@ function mergePricingData(target, source) {
       continue;
     }
     const inheritedTiered = price.tierAdjusted ? undefined : existing?.tiered;
+    const priorityFallbackPrice = price.tierAdjusted
+      ? cloneFallbackPrice(existing?.tierAdjusted ? existing.priorityFallbackPrice : existing)
+      : price.priorityFallbackPrice;
     target[model] = {
       ...price,
       tiered: price.tiered ?? inheritedTiered,
+      priorityExcludedAboveInputTokens: price.tierAdjusted
+        ? PRIORITY_LONG_CONTEXT_EXCLUSION_THRESHOLD_TOKENS
+        : price.priorityExcludedAboveInputTokens,
+      priorityFallbackPrice,
     };
   }
 }
@@ -758,6 +835,15 @@ function addKnownStandardLongContextTiers(model, price) {
   }
 }
 
+function bundledStandardFallbackPrice(model) {
+  const normalized = normalizeModelName(model);
+  const raw = BUNDLED_STANDARD_PRICING[normalized];
+  if (!raw) {
+    return null;
+  }
+  return normalizePrice(raw, bundledMetadata('standard'), normalized);
+}
+
 function bundledMetadata(tier) {
   return {
     source: 'openai-official-bundled',
@@ -927,6 +1013,25 @@ function pricingDetail(requestedModel, matchedModel, price, overrides = {}) {
         costPerMToken: tier.costPerMToken,
       }))
       .sort((a, b) => a.kind.localeCompare(b.kind) || a.thresholdTokens - b.thresholdTokens);
+  }
+  if (Number.isFinite(price.priorityExcludedAboveInputTokens) && price.priorityFallbackPrice) {
+    detail.priorityExcludedAboveInputTokens = price.priorityExcludedAboveInputTokens;
+    detail.priorityFallback = {
+      source: price.priorityFallbackPrice.source ?? null,
+      sourceUrl: price.priorityFallbackPrice.sourceUrl ?? null,
+      inputCostPerMToken: price.priorityFallbackPrice.inputCostPerMToken,
+      cachedInputCostPerMToken: price.priorityFallbackPrice.cachedInputCostPerMToken,
+      outputCostPerMToken: price.priorityFallbackPrice.outputCostPerMToken,
+    };
+    if (price.priorityFallbackPrice.tiered?.length > 0) {
+      detail.priorityFallback.tiered = price.priorityFallbackPrice.tiered
+        .map((tier) => ({
+          kind: tier.kind,
+          thresholdTokens: tier.thresholdTokens,
+          costPerMToken: tier.costPerMToken,
+        }))
+        .sort((a, b) => a.kind.localeCompare(b.kind) || a.thresholdTokens - b.thresholdTokens);
+    }
   }
   return detail;
 }

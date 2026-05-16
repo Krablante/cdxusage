@@ -8,8 +8,15 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
 const args = parseArgs(process.argv.slice(2));
-const upstreamTimeoutSeconds = Number(args.upstreamTimeout ?? args.timeout ?? 25);
-const cdxusageTimeoutSeconds = Number(args.cdxusageTimeout ?? Math.max(90, upstreamTimeoutSeconds));
+const upstreamTimeoutValue = args.upstreamTimeout ?? args.timeout ?? 25;
+const upstreamTimeoutSeconds = parsePositiveSeconds(
+  upstreamTimeoutValue,
+  args.upstreamTimeout != null ? '--upstream-timeout' : args.timeout != null ? '--timeout' : '--upstream-timeout',
+);
+const cdxusageTimeoutSeconds = parsePositiveSeconds(
+  args.cdxusageTimeout ?? Math.max(90, upstreamTimeoutSeconds),
+  args.cdxusageTimeout != null ? '--cdxusage-timeout' : '--cdxusage-timeout',
+);
 const since = args.since ?? '2026-05-01';
 const workDir = await mkdtemp(path.join(tmpdir(), 'cdxusage-bench-'));
 
@@ -58,6 +65,15 @@ function parseArgs(argv) {
 
 function toCamelCase(value) {
   return value.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+}
+
+function parsePositiveSeconds(value, flag) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(`${flag} must be a positive number of seconds`);
+    process.exit(1);
+  }
+  return parsed;
 }
 
 async function measure(label, command, commandArgs, timeoutSeconds) {

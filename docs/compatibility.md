@@ -137,6 +137,9 @@ length without storing every token event in memory or cache.
 Known official long-context uplifts, including standard GPT-5.5 and GPT-5.4
 sessions above 272K input tokens, are also applied when reading older pricing
 caches that predate those tier records.
+Priority Processing prices are not applied to long-context requests that OpenAI
+excludes from Priority Processing; those event buckets fall back to standard
+pricing, including standard long-context tiers when applicable.
 
 Default pricing is `auto`. It reads the resolved Codex home `config.toml` and
 treats `service_tier = "priority"` or legacy `"fast"` as priority pricing.
