@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,13 +36,14 @@ try {
     pricingCacheFile,
   ];
   const rows = [];
+  const upstream = await resolveUpstreamBinary();
   rows.push(await measure('cdxusage cold', process.execPath, [...commonCdxArgs, '--clear-cache'], cdxusageTimeoutSeconds));
   rows.push(await measure('cdxusage warm', process.execPath, commonCdxArgs, cdxusageTimeoutSeconds));
   rows.push(
     await measure(
-      'upstream latest',
-      'npx',
-      ['-y', '@ccusage/codex@latest', 'monthly', '--since', since, '--json'],
+      `@ccusage/codex@${upstream.version}`,
+      upstream.binPath,
+      ['monthly', '--since', since, '--json'],
       upstreamTimeoutSeconds,
     ),
   );
@@ -95,9 +96,39 @@ async function measure(label, command, commandArgs, timeoutSeconds) {
   };
 }
 
-function run(command, args, timeoutSeconds) {
+async function resolveUpstreamBinary() {
+  const versionResult = await run('npm', ['view', '@ccusage/codex@latest', 'version'], 60, { captureStdout: true });
+  if (versionResult.status !== 0 || !versionResult.stdout.trim()) {
+    throw new Error(`failed to resolve @ccusage/codex@latest version: ${versionResult.stderr.trim() || `exit ${versionResult.status}`}`);
+  }
+  const pathResult = await run(
+    'npm',
+    process.platform === 'win32'
+      ? ['exec', '--yes', '--package', '@ccusage/codex@latest', '--', 'cmd', '/d', '/s', '/c', 'where ccusage-codex']
+      : ['exec', '--yes', '--package', '@ccusage/codex@latest', '--', 'sh', '-c', 'command -v ccusage-codex'],
+    60,
+    { captureStdout: true },
+  );
+  if (pathResult.status !== 0 || !pathResult.stdout.trim()) {
+    throw new Error(`failed to resolve @ccusage/codex@latest binary: ${pathResult.stderr.trim() || `exit ${pathResult.status}`}`);
+  }
+  const binPath = pathResult.stdout
+    .trim()
+    .split(/\r?\n/)
+    .find((line) => line.trim());
+  if (!binPath) {
+    throw new Error(`failed to parse @ccusage/codex binary path: ${pathResult.stdout.trim()}`);
+  }
+  return {
+    version: versionResult.stdout.trim().split(/\r?\n/).at(-1),
+    binPath: process.platform === 'win32' ? binPath : await realpath(binPath),
+  };
+}
+
+function run(command, args, timeoutSeconds, options = {}) {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd: repoRoot, stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(command, args, { cwd: repoRoot, stdio: ['ignore', options.captureStdout ? 'pipe' : 'ignore', 'pipe'] });
+    let stdout = '';
     let stderr = '';
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -106,13 +137,21 @@ function run(command, args, timeoutSeconds) {
       setTimeout(() => child.kill('SIGKILL'), 1_000).unref();
     }, Math.ceil(timeoutSeconds * 1000) + 500);
     timer.unref();
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk;
+    });
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk) => {
       stderr += chunk;
     });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      resolve({ status: 127, signal: null, stdout, stderr: `${stderr}${error.message}`, timedOut });
+    });
     child.on('close', (status, signal) => {
       clearTimeout(timer);
-      resolve({ status, signal, stderr, timedOut });
+      resolve({ status, signal, stdout, stderr, timedOut });
     });
   });
 }

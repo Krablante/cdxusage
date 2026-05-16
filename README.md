@@ -146,18 +146,21 @@ Run the local benchmark helper against your own Codex archive:
 npm run benchmark -- --since 2026-05-01 --upstream-timeout 25 --cdxusage-timeout 90
 ```
 
+The helper resolves `@ccusage/codex@latest` and times the actual
+`ccusage-codex` binary so RAM reflects the scanner, not the `npx` wrapper.
+
 Recent local sanity check on a large Codex history:
 
 | Tool | Scenario | Time | RAM | Result |
 | --- | --- | ---: | ---: | --- |
-| `@ccusage/codex@18.0.11` | `--since 2026-05-01`, 25s limit | `>25.03s` | `0.10 GB` before timeout | timed out |
-| `cdxusage` | same filter, cold full scan | `36.90s` | `0.32 GB` | complete |
-| `cdxusage` | same filter, warm cached | `0.46s` | `0.14 GB` | complete |
+| `@ccusage/codex@18.0.11` | `--since 2026-05-01`, 45s limit | `>45.03s` | `2.38 GB` before timeout | timed out |
+| `cdxusage` | same filter, cold full scan | `31.61s` | `0.37 GB` | complete |
+| `cdxusage` | same filter, warm cached | `0.41s` | `0.16 GB` | complete |
 
 Cold scans read every matching JSONL file for correctness, including resumed
 long-lived sessions whose recent events may live in older session files. After
 the cache is built, the same report is dramatically faster: in this run, the
-warm cached path was at least 98.2% faster than the upstream timeout window.
+warm cached path was at least 99.1% faster than the upstream timeout window.
 
 The timeout keeps the upstream run from reaching its worst failure mode. The
 upstream path reads and sorts a large archive-shaped set of token events in
