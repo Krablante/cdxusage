@@ -53,6 +53,29 @@ public ccusage Codex guide.
 - `--sort <auto|date|month|lastActivity|tokens|cost|input|output|session|directory>`
 - `--order <asc|desc>`
 
+## Scanner Diagnostics
+
+Default scanner selection is `auto`: on Linux hosts with working `perl` and
+GNU-compatible `xargs -r`, `cdxusage` uses a native batch prefilter for cold
+full scans and falls back to the Node scanner when native tooling is
+unavailable or fails. Other platforms use the Node scanner unless explicitly
+forced for diagnostics. Tail reads and cached files keep the normal cache
+semantics.
+
+Internal diagnostic override:
+
+```bash
+CDXUSAGE_SCAN_MODE=node cdxusage daily
+CDXUSAGE_SCAN_MODE=grep-batch cdxusage daily
+```
+
+This is not an upstream compatibility surface. With `--include-stats`,
+`scannerModes` reports aggregate scanner counts, `linesSeen` is physical JSONL
+lines scanned, `candidateLinesSeen` is the subset containing `turn_context` or
+`token_count`, and `nativeOutputBytes` is candidate byte volume delivered into
+Node processing. Cache files and stats output can include absolute local paths,
+model names, token volumes, and estimated cost metadata.
+
 ## JSON Output
 
 `daily --json`:

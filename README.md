@@ -27,6 +27,10 @@ histories, that is the multi-GB failure mode `cdxusage` avoids by streaming
 JSONL files, indexing compact per-file summaries, and reusing a small local
 cache.
 
+On Linux hosts with GNU-compatible `perl` and `xargs -r`, cold full scans also
+use a native batch prefilter. Unsupported hosts and native helper failures fall
+back to the Node scanner automatically.
+
 No SQLite. No daemon. No provider catalogs. No background service.
 
 ## Quick Start
@@ -72,6 +76,7 @@ global install, `npx -y github:Krablante/cdxusage`, or
 - pretty terminal tables and JSON output
 - date filters, timezone, locale, sorting, compact tables
 - automatic Codex home discovery on Linux, macOS, Windows, and WSL
+- Linux/GNU native batch prefilter with Node fallback
 - OpenAI/Codex pricing only, with missing non-OpenAI model prices reported
 - offline pricing fallback and disposable local caches
 - portable folder build with Linux/macOS shell, Windows CMD, and PowerShell launchers
@@ -149,25 +154,26 @@ npm run benchmark -- --since 2026-05-01 --upstream-timeout 25 --cdxusage-timeout
 The helper resolves `@ccusage/codex@latest` and times the actual
 `ccusage-codex` binary so RAM reflects the scanner, not the `npx` wrapper.
 
-Recent local sanity check on a large Codex history:
+Recent local sanity check on a large Codex history, comparing this rollout with
+the previous public commit `1c084b4`:
 
 | Tool | Scenario | Time | RAM | Result |
 | --- | --- | ---: | ---: | --- |
-| `@ccusage/codex@18.0.11` | `--since 2026-05-01`, 45s limit | `>45.03s` | `2.38 GB` before timeout | timed out |
-| `cdxusage` | same filter, cold full scan | `31.61s` | `0.37 GB` | complete |
-| `cdxusage` | same filter, warm cached | `0.41s` | `0.16 GB` | complete |
+| `cdxusage` pre-native baseline | cold app cache | `27.80s` | `0.350 GB` | complete |
+| `cdxusage` native auto scanner | cold app cache | `10.46s` | `0.180 GB` | complete |
+| `cdxusage` pre-native baseline | warm app cache | `0.40s` | `0.166 GB` | complete |
+| `cdxusage` native auto scanner | warm app cache | `0.30s` | `0.143 GB` | complete |
 
 See [docs/benchmark-2026-05-16.md](docs/benchmark-2026-05-16.md) for the
 same-run command output behind this table.
 
 Cold scans read every matching JSONL file for correctness, including resumed
 long-lived sessions whose recent events may live in older session files. After
-the cache is built, the same report is dramatically faster: in this run, the
-warm cached path was at least 99.1% faster than the upstream timeout window.
+the cache is built, the same report is dramatically faster.
 
-The timeout keeps the upstream run from reaching its worst failure mode. The
-upstream path reads and sorts a large archive-shaped set of token events in
-memory; `cdxusage` keeps memory bounded and predictable by avoiding that shape.
+The native prefilter reduces the candidate-line byte volume delivered into Node
+processing; it does not claim lower physical disk reads. `bytesRead` in
+`--include-stats` remains the logical source byte count.
 
 ## Portable Folder
 
@@ -219,6 +225,8 @@ npm run check
 npm run lint
 npm run typecheck
 npm test
+npm run test:node
+npm run test:native
 npm run smoke
 npm run portable:smoke
 npm pack --dry-run --json
