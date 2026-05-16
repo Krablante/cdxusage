@@ -497,23 +497,37 @@ async function scanFilesWithGrepBatch(tasks, dateKeyer, billingThresholds) {
     child.once('error', (error) => resolve({ error }));
     child.once('close', (code, signal) => resolve({ code, signal }));
   });
+  const nativeStatus = closed.then((status) => {
+    if (status.error) {
+      throw status.error;
+    }
+    if (status.code !== 0) {
+      throw new Error(`xargs/perl exited with ${status.signal ?? status.code}: ${stderr.trim()}`);
+    }
+    return status;
+  });
   const outputConsumed = consumeGrepBatchOutput(child.stdout, contexts);
 
   try {
-    await writeNativeBatchInput(child.stdin, tasks, getStdinError);
+    await Promise.race([writeNativeBatchInput(child.stdin, tasks, getStdinError), nativeStatus]);
   } catch (error) {
     child.stdin.destroy();
-    await Promise.allSettled([outputConsumed, closed]);
+    child.stdout.destroy();
+    child.stderr.destroy();
+    await Promise.allSettled([outputConsumed, nativeStatus]);
     throw error;
   }
 
-  await outputConsumed;
-  const status = await closed;
-  if (status.error) {
-    throw status.error;
-  }
-  if (status.code !== 0) {
-    throw new Error(`xargs/perl exited with ${status.signal ?? status.code}: ${stderr.trim()}`);
+  try {
+    await Promise.race([outputConsumed, nativeStatus]);
+    await outputConsumed;
+    await nativeStatus;
+  } catch (error) {
+    child.stdin.destroy();
+    child.stdout.destroy();
+    child.stderr.destroy();
+    await Promise.allSettled([outputConsumed, nativeStatus]);
+    throw error;
   }
   for (const task of tasks) {
     const scan = scans.get(task.file);
