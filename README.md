@@ -1,21 +1,42 @@
 # cdxusage
 
-Fast CLI for OpenAI Codex usage: tokens, sessions, and estimated cost.
+<p align="center">
+  <strong>A fast, local Codex usage meter for tokens, sessions, and estimated OpenAI cost.</strong>
+</p>
 
-`cdxusage` scans Codex CLI JSONL sessions without loading the whole archive into
-memory. It auto-discovers Codex data on Linux, macOS, Windows, and WSL, reads
-`config.toml` for priority/fast mode, and keeps only compact disposable file
-caches. No SQLite, Postgres, daemon, or permanent database.
+<p align="center">
+  <code>npx -y github:Krablante/cdxusage monthly</code>
+</p>
+
+<p align="center">
+  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-555">
+  <img alt="Node 20.19.4+" src="https://img.shields.io/badge/node-%3E%3D20.19.4-339933">
+  <img alt="Codex compatible" src="https://img.shields.io/badge/codex-compatible-444">
+  <img alt="OpenAI pricing only" src="https://img.shields.io/badge/pricing-OpenAI%20only-111">
+  <img alt="No database" src="https://img.shields.io/badge/database-none-0f766e">
+</p>
+
+`cdxusage` reads local Codex CLI history and shows daily, monthly, or
+per-session usage: input tokens, cached input, output, reasoning tokens, and an
+estimated API-equivalent OpenAI cost.
+
+It is built for large Codex histories. The original
+`npx -y @ccusage/codex@latest` path can become painful on big archives: long
+CPU-bound scans, very high RAM use, and sometimes multi-GB to tens-of-GB memory
+growth before it finishes. `cdxusage` avoids that shape by streaming JSONL
+files, indexing compact per-file summaries, and reusing a small local cache.
+
+No SQLite. No daemon. No provider catalogs. No background service.
 
 ## Quick Start
 
-Run from GitHub with npx:
+Run directly from GitHub:
 
 ```bash
 npx -y github:Krablante/cdxusage monthly
 ```
 
-Run from a clone:
+Or from a clone:
 
 ```bash
 git clone https://github.com/Krablante/cdxusage.git
@@ -23,21 +44,110 @@ cd cdxusage
 node ./bin/cdxusage.mjs monthly
 ```
 
-Useful commands:
+Useful reports:
 
 ```bash
-node ./bin/cdxusage.mjs daily
-node ./bin/cdxusage.mjs monthly
-node ./bin/cdxusage.mjs session
-node ./bin/cdxusage.mjs monthly --json --include-stats
-node ./bin/cdxusage.mjs monthly --no-priority
-node ./bin/cdxusage.mjs session --since 2026-05-01 --sort cost --order desc
+cdxusage daily
+cdxusage monthly
+cdxusage session
+cdxusage monthly --json --include-stats
+cdxusage session --since 2026-05-01 --sort cost --order desc
 ```
+
+## What You Get
+
+- `daily`, `monthly`, `session`, and `sessions` alias
+- pretty terminal tables and JSON output
+- date filters, timezone, locale, sorting, compact tables
+- automatic Codex home discovery on Linux, macOS, Windows, and WSL
+- OpenAI/Codex pricing only, with missing non-OpenAI model prices reported
+- offline pricing fallback and disposable local caches
+- portable folder build with Linux/macOS shell, Windows CMD, and PowerShell launchers
+
+## Auto Discovery
+
+By default, `cdxusage` does a bounded search only. It checks explicit inputs
+first, then likely Codex locations:
+
+- `--codex-home`, `--sessions-dir`, and `CODEX_HOME`
+- current and near-parent `.codex`
+- `~/.codex`
+- `USERPROFILE\.codex`
+- `APPDATA\Codex`
+- `LOCALAPPDATA\Codex`
+- WSL mappings for Windows-style paths
+
+It does not crawl your whole disk. Override discovery when needed:
+
+```bash
+cdxusage monthly --codex-home ~/.codex
+cdxusage monthly --sessions-dir ~/.codex/sessions
+```
+
+## Pricing
+
+Default pricing mode is `auto`.
+
+`cdxusage` reads the resolved Codex home's `config.toml`. If it sees
+`service_tier = "priority"` or legacy `service_tier = "fast"`, it applies
+OpenAI priority prices to OpenAI models that currently expose official priority
+rates.
+
+Force standard pricing:
+
+```bash
+cdxusage monthly --no-priority
+cdxusage monthly --speed standard
+```
+
+Force priority pricing:
+
+```bash
+cdxusage monthly --speed fast
+cdxusage monthly --speed fast --priority-models all
+cdxusage monthly --speed fast --priority-models gpt-5.5,gpt-5.4-mini
+```
+
+Pricing sources are intentionally OpenAI-only:
+
+1. live OpenAI API pricing docs
+2. live OpenAI Priority Processing pricing
+3. bundled OpenAI/Codex fallback snapshot
+
+Non-OpenAI model routes are not guessed. They are reported in
+`pricing.missingModels` when stats are enabled.
+
+`costUSD` is an estimate based on logged input, cached input, and output tokens.
+It is not an invoice and may differ from subscription or credit accounting
+screens.
+
+## Performance
+
+Run the local benchmark helper against your own Codex archive:
+
+```bash
+npm run benchmark -- --since 2026-05-01 --timeout 25
+```
+
+Recent local sanity check on a large Codex history:
+
+| Tool | Scenario | Time | RAM | Result |
+| --- | --- | ---: | ---: | --- |
+| `@ccusage/codex@18.0.11` | `--since 2026-05-01`, 25s limit | `>25.01s` | not comparable | timed out |
+| `cdxusage` | same filter, cold full scan | `36.57s` | `0.34 GB` | complete |
+| `cdxusage` | same filter, warm cached | `0.43s` | `0.14 GB` | complete |
+
+Cold scans read every matching JSONL file for correctness, including resumed
+long-lived sessions whose recent events may live in older session files. After
+the cache is built, the same report is dramatically faster: in this run, the
+warm cached path was at least 98.3% faster than the upstream timeout window.
+
+The important bit is the failure mode: `cdxusage` keeps memory bounded and
+predictable instead of loading a huge archive shape into RAM.
 
 ## Portable Folder
 
-Build a self-contained folder with Linux/macOS, Windows CMD, and PowerShell
-launchers:
+Build a self-contained folder:
 
 ```bash
 npm run portable:build
@@ -62,86 +172,13 @@ cd portable
 Portable mode still needs Node.js `>=20.19.4`, but it does not need
 `npm install`.
 
-## Auto Discovery
-
-Unless you pass `--codex-home`, `--sessions-dir`, or `CODEX_HOME`, discovery is
-bounded and checks only likely Codex locations:
-
-- current and near-parent `.codex`
-- `~/.codex`
-- `HOME/.codex`
-- `USERPROFILE\.codex`
-- `APPDATA\Codex`
-- `LOCALAPPDATA\Codex`
-- WSL mappings for Windows-style paths when running under Linux/WSL
-
-There is no full-disk search. If discovery picks the wrong folder, override it:
-
-```bash
-cdxusage monthly --codex-home ~/.codex
-cdxusage monthly --sessions-dir ~/.codex/sessions
-```
-
-## Pricing
-
-Default pricing mode is `auto`.
-
-`cdxusage` reads the resolved Codex home's `config.toml`. If it sees
-`service_tier = "priority"` or legacy `service_tier = "fast"`, it applies
-OpenAI priority prices to all OpenAI models that currently expose official
-priority rates.
-
-Force standard pricing:
-
-```bash
-cdxusage monthly --no-priority
-cdxusage monthly --speed standard
-```
-
-Force priority pricing:
-
-```bash
-cdxusage monthly --speed fast
-cdxusage monthly --speed fast --priority-models all
-cdxusage monthly --speed fast --priority-models gpt-5.5,gpt-5.4-mini
-```
-
-Pricing sources are intentionally OpenAI-only:
-
-1. live OpenAI API pricing docs
-2. live OpenAI Priority Processing pricing
-3. bundled OpenAI/Codex fallback snapshot
-
-Non-OpenAI model routes are reported in `pricing.missingModels`. `cdxusage`
-does not fetch or price non-OpenAI provider catalogs.
-
-`costUSD` is an estimated API-equivalent value based on logged input, cached
-input, and output tokens. It is not an invoice and may differ from subscription
-credit/accounting screens.
-
 ## Compatibility
 
-See [docs/compatibility.md](docs/compatibility.md).
+`cdxusage` keeps the useful `@ccusage/codex` UX shape: report modes, JSON,
+pretty tables, filters, offline mode, and terminal-friendly output. See
+[docs/compatibility.md](docs/compatibility.md) for details.
 
-Implemented report modes:
-
-- `daily`
-- `monthly`
-- `session`
-- `sessions` alias
-
-Supported output/features:
-
-- pretty terminal tables
-- JSON output
-- date filters
-- timezone and locale
-- offline pricing/cache mode
-- compact tables
-- sort/order extensions
-- token cache and pricing cache controls
-
-Intentional differences from `@ccusage/codex`:
+Intentional differences:
 
 - binary is `cdxusage`
 - default pricing is `auto`, not always standard
@@ -151,37 +188,7 @@ Intentional differences from `@ccusage/codex`:
 - non-OpenAI model prices are reported missing instead of filled from provider
   catalogs
 
-## Benchmarks
-
-Run the local benchmark helper against your own Codex archive:
-
-```bash
-npm run benchmark -- --since 2026-05-01 --timeout 25
-```
-
-It runs `cdxusage` cold, `cdxusage` warm, and
-`npx -y @ccusage/codex@latest` with the same date filter. On Linux it also
-captures max RSS through `/usr/bin/time -v`.
-
-Recent local sanity check on a large Codex archive:
-
-| Tool | Scenario | Time | RSS | Result |
-| --- | --- | ---: | ---: | --- |
-| `@ccusage/codex@18.0.11` | `--since 2026-05-01`, timeout 25s | `>25.01s` | n/a | timed out |
-| `cdxusage` | same filter, cold full scan | `36.57s` | `359440KB` | complete |
-| `cdxusage` | same filter, warm cached | `0.43s` | `150960KB` | complete |
-
-The cold path scans every matching JSONL file for correctness, including
-long-lived resumed sessions whose events may fall far outside the session path
-date. The warm cached path was at least 98.3% faster than upstream's bounded
-timeout in this run. Upstream did not complete in the timeout window, so
-upstream final RSS is not comparable for this real-profile check.
-
-Live pricing status from a fresh check: OpenAI official + bundled fallback,
-`modelCount: 65`. Non-OpenAI routes, if present in local Codex logs, are left
-unpriced and reported in `pricing.missingModels`.
-
-## Verification
+## Development
 
 ```bash
 npm run check
@@ -195,5 +202,5 @@ npm pack --dry-run --json
 
 Caches live under `${XDG_CACHE_HOME:-$HOME/.cache}/cdxusage/` by default and
 are safe to delete. Token cache files above `--max-cache-bytes`
-(`CDXUSAGE_MAX_CACHE_BYTES`, default 64MiB, minimum 1MiB) are ignored on load
+(`CDXUSAGE_MAX_CACHE_BYTES`, default 64 MiB, minimum 1 MiB) are ignored on load
 and skipped on save.

@@ -85,12 +85,12 @@ function parseMaxRss(stderr) {
 }
 
 function printRows(rows) {
-  console.log('| Tool | Time | RSS | Result |');
+  console.log('| Tool | Time | RAM | Result |');
   console.log('| --- | ---: | ---: | --- |');
   for (const row of rows) {
     const time = row.timedOut ? `>${row.wallSeconds.toFixed(2)}s` : `${row.wallSeconds.toFixed(2)}s`;
-    const rss = row.maxRssKb == null ? 'n/a' : `${row.maxRssKb}KB`;
+    const ram = row.maxRssKb == null ? 'n/a' : `${(row.maxRssKb / 1024 / 1024).toFixed(2)} GB`;
     const result = row.timedOut ? `timed out (${row.status})` : row.status === 0 ? 'complete' : `exit ${row.status}`;
-    console.log(`| ${row.label} | ${time} | ${rss} | ${result} |`);
+    console.log(`| ${row.label} | ${time} | ${ram} | ${result} |`);
   }
 }
