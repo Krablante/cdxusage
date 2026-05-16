@@ -42,11 +42,11 @@ try {
   );
 
   const isPortable = process.argv.includes('--portable');
-  const command = isPortable ? path.join(repoRoot, 'portable', 'cdxusage') : process.execPath;
+  const command = isPortable ? portableCommand() : process.execPath;
   const args = isPortable
     ? ['monthly', '--codex-home', codexHome, '--offline', '--json', '--include-stats', '--cache-file', path.join(root, 'index.json'), '--pricing-cache-file', path.join(root, 'pricing.json')]
     : [path.join(repoRoot, 'bin', 'cdxusage.mjs'), 'monthly', '--codex-home', codexHome, '--offline', '--json', '--include-stats', '--cache-file', path.join(root, 'index.json'), '--pricing-cache-file', path.join(root, 'pricing.json')];
-  const result = spawnSync(command, args, { encoding: 'utf8' });
+  const result = spawnSync(command, args, { encoding: 'utf8', shell: isPortable && process.platform === 'win32' });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.monthly.length, 1);
@@ -57,4 +57,10 @@ try {
   console.log('smoke ok');
 } finally {
   await rm(root, { recursive: true, force: true });
+}
+
+function portableCommand() {
+  return process.platform === 'win32'
+    ? path.join(repoRoot, 'portable', 'cdxusage.cmd')
+    : path.join(repoRoot, 'portable', 'cdxusage');
 }
