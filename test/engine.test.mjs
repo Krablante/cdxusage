@@ -185,6 +185,34 @@ const staleMtimeReport = await collectUsage({
 assert.equal(staleMtimeReport.totals.totalTokens, 6);
 assert.equal(staleMtimeReport.stats.filesSkippedByMtime, 0);
 
+const resumedHome = path.join(root, 'resumed-codex-home');
+const resumedSessions = path.join(resumedHome, 'sessions/2026/05/01');
+await mkdir(resumedSessions, { recursive: true });
+await writeFile(
+  path.join(resumedSessions, 'resumed-session.jsonl'),
+  [
+    JSON.stringify({ timestamp: '2026-05-01T00:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-test' } }),
+    JSON.stringify({
+      timestamp: '2026-05-16T12:00:00.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 4, cached_input_tokens: 0, output_tokens: 1, total_tokens: 5 } },
+      },
+    }),
+    '',
+  ].join('\n'),
+);
+const resumedReport = await collectUsage({
+  codexHome: resumedHome,
+  cacheFile: path.join(root, 'resumed-cache.json'),
+  timezone: 'UTC',
+  since: '2026-05-16',
+  pricingData,
+});
+assert.equal(resumedReport.totals.totalTokens, 5);
+assert.equal(resumedReport.stats.filesSkippedByPathDate, 0);
+
 await writeFile(cacheFile, 'x'.repeat(1024 * 1024 + 1));
 const oversizedCache = await collectUsage({ codexHome, cacheFile, timezone: 'UTC', pricingData, maxCacheBytes: 1024 * 1024 });
 assert.equal(oversizedCache.stats.cacheLoadSkippedBySize, true);

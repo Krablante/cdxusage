@@ -29,8 +29,6 @@ export async function collectUsage(options = {}) {
   const timezone = safeTimeZone(options.timezone);
   const since = normalizeDate(options.since);
   const until = normalizeDate(options.until);
-  const pruneBeforeDate = since ? addDaysToDateKey(since, -2) : undefined;
-  const pruneAfterDate = until ? addDaysToDateKey(until, 2) : undefined;
   const cacheFile = options.cacheFile ?? defaultCacheFile();
   const useCache = options.useCache !== false;
   const saveCache = useCache && options.saveCache !== false;
@@ -70,16 +68,6 @@ export async function collectUsage(options = {}) {
     stats.bytesSeen += st.size;
 
     const sessionInfo = makeSessionInfo(file, sessionsDir);
-    if (shouldSkipBySessionPathDate(sessionInfo.directory, pruneBeforeDate, pruneAfterDate)) {
-      stats.filesSkippedByPathDate += 1;
-      stats.bytesSkippedByPathDate += st.size;
-      const oldEntry = useCache ? cache.files[file] : undefined;
-      if (oldEntry && sameFile(st, oldEntry)) {
-        nextFiles[file] = oldEntry;
-      }
-      continue;
-    }
-
     const oldEntry = useCache ? cache.files[file] : undefined;
     let entry;
 
@@ -867,42 +855,6 @@ export function isWithinRange(dateKey, since, until) {
     return false;
   }
   return true;
-}
-
-function shouldSkipBySessionPathDate(directory, pruneBeforeDate, pruneAfterDate) {
-  if (!pruneBeforeDate && !pruneAfterDate) {
-    return false;
-  }
-  const dateKey = sessionPathDateKey(directory);
-  if (!dateKey) {
-    return false;
-  }
-  if (pruneBeforeDate && dateKey < pruneBeforeDate) {
-    return true;
-  }
-  if (pruneAfterDate && dateKey > pruneAfterDate) {
-    return true;
-  }
-  return false;
-}
-
-function sessionPathDateKey(directory) {
-  const match = String(directory).match(/(?:^|\/)(\d{4})\/(\d{2})\/(\d{2})(?:\/|$)/);
-  if (!match) {
-    return null;
-  }
-  const dateKey = `${match[1]}-${match[2]}-${match[3]}`;
-  try {
-    return normalizeDate(dateKey);
-  } catch {
-    return null;
-  }
-}
-
-function addDaysToDateKey(dateKey, days) {
-  const [year, month, day] = dateKey.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day + days));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 }
 
 export function safeTimeZone(timezone) {
