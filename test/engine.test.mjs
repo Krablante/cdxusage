@@ -536,7 +536,7 @@ if (process.platform === 'win32') {
 }
 const previousPath = process.env.PATH;
 process.env.CDXUSAGE_SCAN_MODE = 'grep-batch';
-process.env.PATH = `${fakeBin}${path.delimiter}${previousPath ?? ''}`;
+process.env.PATH = fakeBin;
 try {
   const nativeEarlyExit = await collectUsage({
     codexHome: nativeEarlyExitHome,
