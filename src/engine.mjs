@@ -493,8 +493,8 @@ async function scanFilesWithGrepBatch(tasks, dateKeyer, billingThresholds) {
     stderr = `${stderr}${chunk}`.slice(-4096);
   });
   const getStdinError = trackWritableError(child.stdin);
-  const closed = new Promise((resolve, reject) => {
-    child.once('error', reject);
+  const closed = new Promise((resolve) => {
+    child.once('error', (error) => resolve({ error }));
     child.once('close', (code, signal) => resolve({ code, signal }));
   });
   const outputConsumed = consumeGrepBatchOutput(child.stdout, contexts);
@@ -509,6 +509,9 @@ async function scanFilesWithGrepBatch(tasks, dateKeyer, billingThresholds) {
 
   await outputConsumed;
   const status = await closed;
+  if (status.error) {
+    throw status.error;
+  }
   if (status.code !== 0) {
     throw new Error(`xargs/perl exited with ${status.signal ?? status.code}: ${stderr.trim()}`);
   }
