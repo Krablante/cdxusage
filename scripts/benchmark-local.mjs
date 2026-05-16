@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
 const args = parseArgs(process.argv.slice(2));
-const timeoutSeconds = Number(args.timeout ?? 25);
+const upstreamTimeoutSeconds = Number(args.upstreamTimeout ?? args.timeout ?? 25);
+const cdxusageTimeoutSeconds = Number(args.cdxusageTimeout ?? Math.max(90, upstreamTimeoutSeconds));
 const since = args.since ?? '2026-05-01';
 const workDir = await mkdtemp(path.join(tmpdir(), 'cdxusage-bench-'));
 
@@ -28,9 +29,16 @@ try {
     pricingCacheFile,
   ];
   const rows = [];
-  rows.push(await measure('cdxusage cold', process.execPath, [...commonCdxArgs, '--clear-cache'], timeoutSeconds));
-  rows.push(await measure('cdxusage warm', process.execPath, commonCdxArgs, timeoutSeconds));
-  rows.push(await measure('upstream latest', 'npx', ['-y', '@ccusage/codex@latest', 'monthly', '--since', since, '--json'], timeoutSeconds));
+  rows.push(await measure('cdxusage cold', process.execPath, [...commonCdxArgs, '--clear-cache'], cdxusageTimeoutSeconds));
+  rows.push(await measure('cdxusage warm', process.execPath, commonCdxArgs, cdxusageTimeoutSeconds));
+  rows.push(
+    await measure(
+      'upstream latest',
+      'npx',
+      ['-y', '@ccusage/codex@latest', 'monthly', '--since', since, '--json'],
+      upstreamTimeoutSeconds,
+    ),
+  );
   printRows(rows);
 } finally {
   await rm(workDir, { recursive: true, force: true });
@@ -41,7 +49,7 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     const [key, inlineValue] = token.split('=', 2);
-    if (key === '--since' || key === '--timeout') {
+    if (key === '--since' || key === '--timeout' || key === '--upstream-timeout' || key === '--cdxusage-timeout') {
       out[key.slice(2)] = inlineValue ?? argv[++index];
     }
   }

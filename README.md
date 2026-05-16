@@ -126,24 +126,26 @@ screens.
 Run the local benchmark helper against your own Codex archive:
 
 ```bash
-npm run benchmark -- --since 2026-05-01 --timeout 25
+npm run benchmark -- --since 2026-05-01 --upstream-timeout 25 --cdxusage-timeout 90
 ```
 
 Recent local sanity check on a large Codex history:
 
 | Tool | Scenario | Time | RAM | Result |
 | --- | --- | ---: | ---: | --- |
-| `@ccusage/codex@18.0.11` | `--since 2026-05-01`, 25s limit | `>25.01s` | not comparable | timed out |
-| `cdxusage` | same filter, cold full scan | `36.57s` | `0.34 GB` | complete |
-| `cdxusage` | same filter, warm cached | `0.43s` | `0.14 GB` | complete |
+| `@ccusage/codex@18.0.11` | `--since 2026-05-01`, 25s limit | `>25.03s` | `0.10 GB` before timeout | timed out |
+| `cdxusage` | same filter, cold full scan | `36.90s` | `0.32 GB` | complete |
+| `cdxusage` | same filter, warm cached | `0.46s` | `0.14 GB` | complete |
 
 Cold scans read every matching JSONL file for correctness, including resumed
 long-lived sessions whose recent events may live in older session files. After
 the cache is built, the same report is dramatically faster: in this run, the
-warm cached path was at least 98.3% faster than the upstream timeout window.
+warm cached path was at least 98.2% faster than the upstream timeout window.
 
-The important bit is the failure mode: `cdxusage` keeps memory bounded and
-predictable instead of loading a huge archive shape into RAM.
+The timeout keeps the upstream run from reaching its worst failure mode. On
+large histories, that path can continue growing into multi-GB or tens-of-GB RAM
+use; `cdxusage` keeps memory bounded and predictable instead of loading a huge
+archive shape into RAM.
 
 ## Portable Folder
 
