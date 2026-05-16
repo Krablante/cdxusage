@@ -11,10 +11,12 @@
   },
   "scripts": {
     "start": "node ./bin/cdxusage.mjs",
-    "check": "node --check ./bin/cdxusage.mjs && node --check ./src/cli.mjs && node --check ./src/codex-home.mjs && node --check ./src/engine.mjs && node --check ./src/format.mjs && node --check ./src/pricing.mjs && node --check ./src/table.mjs && node --check ./scripts/build-portable.mjs && node --check ./scripts/benchmark-local.mjs && node --check ./test/smoke.mjs",
+    "check": "node --check ./bin/cdxusage.mjs && node --check ./src/cli.mjs && node --check ./src/codex-home.mjs && node --check ./src/discovery.mjs && node --check ./src/engine.mjs && node --check ./src/format.mjs && node --check ./src/pricing.mjs && node --check ./src/table.mjs && node --check ./scripts/build-portable.mjs && node --check ./scripts/benchmark-local.mjs && node --check ./test/smoke.mjs",
     "lint": "npm run check",
     "typecheck": "npm run check",
     "test": "node ./test/codex-home.test.mjs && node ./test/engine.test.mjs && node ./test/cli.test.mjs && node ./test/pricing.test.mjs",
+    "test:node": "CDXUSAGE_SCAN_MODE=node npm test",
+    "test:native": "CDXUSAGE_SCAN_MODE=grep-batch npm test",
     "smoke": "node ./test/smoke.mjs",
     "portable:build": "node ./scripts/build-portable.mjs",
     "portable:smoke": "npm run portable:build && sh ./portable/cdxusage --version && node -e \"const fs=require('fs'); for (const file of ['portable/LICENSE','portable/cdxusage.cmd','portable/cdxusage.ps1','portable/src/codex-home.mjs']) if (!fs.existsSync(file)) process.exit(1)\" && node ./test/smoke.mjs --portable",

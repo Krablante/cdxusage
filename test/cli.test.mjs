@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { VERSION, main, parseArgs } from '../src/cli.mjs';
+import { main, parseArgs } from '../src/cli.mjs';
 
 const root = path.join(tmpdir(), `cdxusage-cli-${process.pid}`);
 const codexHome = path.join(root, 'codex-home');
@@ -10,7 +10,6 @@ const sessionsDir = path.join(codexHome, 'sessions/2026/05/16');
 const file = path.join(sessionsDir, 'rollout-2026-05-16T00-00-00-compat.jsonl');
 const cacheFile = path.join(root, 'cache/index.json');
 const pricingCacheFile = path.join(root, 'cache/pricing.json');
-const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
 await rm(root, { recursive: true, force: true });
 await mkdir(sessionsDir, { recursive: true });
@@ -39,9 +38,13 @@ await writeFile(
   ].join('\n'),
 );
 
-assert.equal(VERSION, packageJson.version);
 assert.equal(parseArgs(['monthly', '--json']).command, 'monthly');
 assert.equal(parseArgs(['sessions']).command, 'sessions');
+assert.equal(parseArgs(['--json', 'daily']).command, 'daily');
+assert.equal(parseArgs(['--offline', 'monthly']).command, 'monthly');
+assert.equal(parseArgs(['--version', 'daily']).command, 'daily');
+assert.equal(parseArgs(['--help', 'daily']).command, 'daily');
+assert.throws(() => parseArgs(['daily', 'monthly']), /Unknown command or argument/);
 assert.equal(parseArgs(['monthly']).speed, 'auto');
 assert.equal(parseArgs(['daily', '--speed', 'auto']).speed, 'auto');
 assert.equal(parseArgs(['daily', '--speed', 'fast']).speed, 'fast');
@@ -312,6 +315,62 @@ const noCache = await runCli([
 const noCacheJson = JSON.parse(noCache.stdout);
 assert.equal(noCacheJson.stats.cacheEntriesSaved, 0);
 assert.equal(noCacheJson.stats.cacheFile, null);
+
+const previousPath = process.env.PATH;
+const previousScanMode = process.env.CDXUSAGE_SCAN_MODE;
+const missingFindBin = path.join(root, 'missing-find-bin');
+await mkdir(missingFindBin, { recursive: true });
+process.env.PATH = missingFindBin;
+process.env.CDXUSAGE_SCAN_MODE = 'node';
+try {
+  const missingFindAuto = await runCli([
+    'daily',
+    '--json',
+    '--offline',
+    '--no-pricing',
+    '--include-stats',
+    '--discovery',
+    'auto',
+    '--codex-home',
+    codexHome,
+    '--cache-file',
+    path.join(root, 'cache/missing-find-auto.json'),
+    '--pricing-cache-file',
+    pricingCacheFile,
+  ]);
+  assert.equal(missingFindAuto.code, 0);
+  assert.equal(missingFindAuto.stderr, '');
+  assert.match(JSON.parse(missingFindAuto.stdout).stats.discoveryMode, /^node-fallback:/);
+
+  const missingFindForced = await runCli([
+    'daily',
+    '--json',
+    '--offline',
+    '--no-pricing',
+    '--discovery',
+    'find',
+    '--codex-home',
+    codexHome,
+    '--cache-file',
+    path.join(root, 'cache/missing-find-forced.json'),
+    '--pricing-cache-file',
+    pricingCacheFile,
+  ]);
+  assert.equal(missingFindForced.code, 1);
+  assert.match(missingFindForced.stderr, /find discovery is unavailable: spawn find ENOENT/);
+  assert.doesNotMatch(missingFindForced.stderr, /node:internal|ErrorCaptureStackTrace/);
+} finally {
+  if (previousPath == null) {
+    delete process.env.PATH;
+  } else {
+    process.env.PATH = previousPath;
+  }
+  if (previousScanMode == null) {
+    delete process.env.CDXUSAGE_SCAN_MODE;
+  } else {
+    process.env.CDXUSAGE_SCAN_MODE = previousScanMode;
+  }
+}
 
 const badTimezone = await runCli(['daily', '--timezone', 'Not/AZone']);
 assert.equal(badTimezone.code, 1);

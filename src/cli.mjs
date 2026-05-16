@@ -65,30 +65,36 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
   }
   const locale = args.locale ?? DEFAULT_LOCALE;
   const mode = args.command === 'sessions' ? 'session' : args.command;
-  const dataPaths = await resolveCodexDataPaths({
-    codexHome: args.codexHome,
-    sessionsDir: args.sessionsDir,
-  });
-  const pricingMode = await resolvePricingMode(args, dataPaths.codexHome);
-  const report = await collectUsage({
-    dataPaths,
-    since,
-    until,
-    timezone,
-    cacheFile: args.cacheFile,
-    pricingCacheFile: args.pricingCacheFile,
-    pricingOffline: args.offline,
-    pricingTtlMs: args.pricingTtlHours != null ? Number(args.pricingTtlHours) * 60 * 60 * 1000 : undefined,
-    pricingFetchTimeoutMs: args.pricingFetchTimeoutMs != null ? Number(args.pricingFetchTimeoutMs) : undefined,
-    pricingTier: pricingMode.tier,
-    pricingPriorityModels: pricingMode.priorityModels,
-    maxCacheBytes: args.maxCacheBytes != null ? Number(args.maxCacheBytes) : undefined,
-    useCache: !args.noCache,
-    clearCache: args.clearCache,
-    saveCache: !args.noSaveCache,
-    discoveryMode: args.discovery,
-    includePricing: !args.noPricing,
-  });
+  let report;
+  try {
+    const dataPaths = await resolveCodexDataPaths({
+      codexHome: args.codexHome,
+      sessionsDir: args.sessionsDir,
+    });
+    const pricingMode = await resolvePricingMode(args, dataPaths.codexHome);
+    report = await collectUsage({
+      dataPaths,
+      since,
+      until,
+      timezone,
+      cacheFile: args.cacheFile,
+      pricingCacheFile: args.pricingCacheFile,
+      pricingOffline: args.offline,
+      pricingTtlMs: args.pricingTtlHours != null ? Number(args.pricingTtlHours) * 60 * 60 * 1000 : undefined,
+      pricingFetchTimeoutMs: args.pricingFetchTimeoutMs != null ? Number(args.pricingFetchTimeoutMs) : undefined,
+      pricingTier: pricingMode.tier,
+      pricingPriorityModels: pricingMode.priorityModels,
+      maxCacheBytes: args.maxCacheBytes != null ? Number(args.maxCacheBytes) : undefined,
+      useCache: !args.noCache,
+      clearCache: args.clearCache,
+      saveCache: !args.noSaveCache,
+      discoveryMode: args.discovery,
+      includePricing: !args.noPricing,
+    });
+  } catch (error) {
+    io.stderr.write(`${error?.message ?? String(error)}\n`);
+    return 1;
+  }
 
   const rows = rowsForMode(report, mode, { locale, sort: args.sort, order: args.order });
   if (args.json) {
@@ -248,6 +254,11 @@ export function parseArgs(argv) {
         if (token.startsWith('--')) {
           throw new Error(`Unknown option: ${token}`);
         }
+        if (COMMANDS.has(token) && !args.commandSpecified) {
+          args.command = token;
+          args.commandSpecified = true;
+          break;
+        }
         throw new Error(`Unknown command or argument: ${token}`);
     }
   }
@@ -309,9 +320,19 @@ function compareRows(a, b, sort, mode) {
 
 function compareDefault(a, b, mode) {
   if (mode === 'session') {
-    return String(a.lastActivity ?? '').localeCompare(String(b.lastActivity ?? ''));
+    return compareTimestamp(a.lastActivity, b.lastActivity);
   }
   return String(a.key ?? '').localeCompare(String(b.key ?? ''));
+}
+
+function compareTimestamp(left, right) {
+  return toSortableTimestamp(left).localeCompare(toSortableTimestamp(right));
+}
+
+function toSortableTimestamp(value) {
+  const text = String(value ?? '');
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : text;
 }
 
 function compareNumber(a, b) {

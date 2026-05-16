@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, opendir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { finished } from 'node:stream/promises';
 import path from 'node:path';
 import { resolveCodexDataPaths } from './codex-home.mjs';
+import { discoverJsonlFiles } from './discovery.mjs';
 import { calculateCostFromUsageOrEvents, loadPricingCatalog } from './pricing.mjs';
 
 const CACHE_VERSION = 2;
@@ -12,10 +13,30 @@ const CACHE_SOURCE = 'cdxusage-index';
 const DEFAULT_BILLING_THRESHOLDS = Object.freeze([128_000, 200_000, 256_000, 272_000]);
 const TOKEN_NEEDLE = Buffer.from('token_count');
 const TURN_NEEDLE = Buffer.from('turn_context');
+const SCAN_NEEDLES = Object.freeze([TOKEN_NEEDLE, TURN_NEEDLE]);
 const MODEL_RE = /"model"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/;
-const FIND_FIELD_SEPARATOR = '\x1f';
-const FIND_RECORD_SEPARATOR = '\x1e';
 const DEFAULT_MAX_CACHE_BYTES = 64 * 1024 * 1024;
+const NATIVE_BATCH_PERL_SCRIPT = `
+BEGIN { $current = ""; $lines = 0; }
+sub emit_count {
+  if ($current ne "") {
+    print "C\\0$current\\0$lines\\0";
+  }
+}
+if ($ARGV ne $current) {
+  emit_count();
+  $current = $ARGV;
+  $lines = 0;
+}
+$lines++;
+if (index($_, "token_count") >= 0 || index($_, "turn_context") >= 0) {
+  chomp;
+  s/\\r\\z//;
+  print "L\\0$ARGV\\0$_\\0";
+}
+END { emit_count(); }
+`;
+let nativeBatchCapabilityPromise;
 
 export function defaultCacheFile() {
   const root = process.env.XDG_CACHE_HOME || path.join(homedir(), '.cache');
@@ -27,6 +48,7 @@ export async function collectUsage(options = {}) {
   const codexHome = dataPaths.codexHome;
   const sessionsDir = dataPaths.sessionsDir;
   const timezone = safeTimeZone(options.timezone);
+  const dateKeyer = createDateKeyer(timezone);
   const since = normalizeDate(options.since);
   const until = normalizeDate(options.until);
   const cacheFile = options.cacheFile ?? defaultCacheFile();
@@ -39,6 +61,7 @@ export async function collectUsage(options = {}) {
       ? await loadPricingCatalog(pricingCatalogOptions(options))
       : null;
   const billingThresholds = normalizeBillingThresholds(pricingCatalog?.metadata?.billingThresholds);
+  const scannerMode = process.env.CDXUSAGE_SCAN_MODE ?? 'auto';
 
   const loadResult =
     useCache && !options.clearCache
@@ -61,61 +84,61 @@ export async function collectUsage(options = {}) {
   stats.cacheLoadSkippedBySize = Boolean(loadResult.skippedBySize);
   const aggregate = createAggregate();
 
-  for await (const discovered of discoverJsonlFiles(sessionsDir, { mode: discoveryMode, stats })) {
-    const file = discovered.path;
-    const st = discovered.stat ?? (await stat(file));
-    stats.filesSeen += 1;
-    stats.bytesSeen += st.size;
-
-    const sessionInfo = makeSessionInfo(file, sessionsDir);
-    const oldEntry = useCache ? cache.files[file] : undefined;
-    let entry;
-
-    if (oldEntry && sameFile(st, oldEntry)) {
-      entry = oldEntry;
-      stats.filesFromCache += 1;
-      stats.bytesSkippedByCache += st.size;
-    } else if (oldEntry && appendableFile(st, oldEntry)) {
-      const tail = await scanFileRange(file, sessionInfo, timezone, oldEntry.size, oldEntry.state, billingThresholds);
-      entry = finalizeCacheEntry(st, mergeEntries(oldEntry, tail), file);
-      stats.filesScannedTail += 1;
-      stats.bytesRead += tail.stats.bytesRead;
-      stats.bytesSkippedByTailCache += oldEntry.size;
-      addScanStats(stats, tail.stats);
-    } else {
-      const scan = await scanFileRange(file, sessionInfo, timezone, 0, undefined, billingThresholds);
-      entry = finalizeCacheEntry(st, scan, file);
-      stats.filesScannedFull += 1;
-      stats.bytesRead += scan.stats.bytesRead;
-      addScanStats(stats, scan.stats);
-      if (oldEntry) {
-        stats.filesCacheStale += 1;
-      } else {
-        stats.filesCacheMiss += 1;
-      }
-    }
-
-    nextFiles[file] = entry;
-    addEntryToAggregate(entry, aggregate, { since, until });
+  if (await shouldUseNativeBatchScanner(scannerMode)) {
+    await collectEntriesWithGrepBatch({
+      sessionsDir,
+      discoveryMode,
+      stats,
+      cache,
+      useCache,
+      dateKeyer,
+      timezone,
+      billingThresholds,
+      since,
+      until,
+      nextFiles,
+      aggregate,
+    });
+  } else {
+    await collectEntriesWithNode({
+      sessionsDir,
+      discoveryMode,
+      stats,
+      cache,
+      useCache,
+      dateKeyer,
+      timezone,
+      billingThresholds,
+      since,
+      until,
+      nextFiles,
+      aggregate,
+    });
   }
 
   const report = buildReport(aggregate, stats, nextFiles);
 
   if (saveCache) {
     try {
-      const saveResult = await saveCacheFile(cacheFile, {
-        version: CACHE_VERSION,
-        source: CACHE_SOURCE,
-        timezone,
-        billingThresholds,
-        updatedAt: new Date().toISOString(),
-        files: nextFiles,
-      }, maxCacheBytes);
-      report.stats.cacheBytes = saveResult.bytes;
-      report.stats.cacheSaveSkippedBySize = !saveResult.saved;
-      if (saveResult.saved) {
+      if (!stats.cacheDirty && loadResult.cacheFileBytes != null) {
+        report.stats.cacheBytes = loadResult.cacheFileBytes;
         report.stats.cacheFile = cacheFile;
-        report.stats.cacheEntriesSaved = Object.keys(nextFiles).length;
+        report.stats.cacheSaveSkippedUnchanged = true;
+      } else {
+        const saveResult = await saveCacheFile(cacheFile, {
+          version: CACHE_VERSION,
+          source: CACHE_SOURCE,
+          timezone,
+          billingThresholds,
+          updatedAt: new Date().toISOString(),
+          files: nextFiles,
+        }, maxCacheBytes);
+        report.stats.cacheBytes = saveResult.bytes;
+        report.stats.cacheSaveSkippedBySize = !saveResult.saved;
+        if (saveResult.saved) {
+          report.stats.cacheFile = cacheFile;
+          report.stats.cacheEntriesSaved = Object.keys(nextFiles).length;
+        }
       }
     } catch (error) {
       report.stats.cacheSaveSkippedByError = true;
@@ -137,6 +160,16 @@ export async function collectUsage(options = {}) {
   }
 
   return report;
+}
+
+async function shouldUseNativeBatchScanner(scannerMode) {
+  if (scannerMode === 'grep-batch') {
+    return true;
+  }
+  if (scannerMode === 'node' || scannerMode === 'needle' || scannerMode === 'line' || scannerMode === 'grep') {
+    return false;
+  }
+  return canUseNativeBatchScanner();
 }
 
 export async function applyPricingToReport(report, options = {}, pricingCatalog = null) {
@@ -283,152 +316,123 @@ function markPricingSkipped(report) {
   report.totals.costUSD = null;
 }
 
-export async function* discoverJsonlFiles(root, options = {}) {
-  const mode = options.mode ?? 'auto';
-  if (mode !== 'node') {
-    let yielded = 0;
-    try {
-      for await (const entry of discoverJsonlFilesWithFind(root)) {
-        options.stats.discoveryMode ??= 'find';
-        yielded += 1;
-        yield entry;
-      }
-      return;
-    } catch (error) {
-      if (mode === 'find' || yielded > 0) {
-        throw error;
-      }
-      options.stats.discoveryMode ??= `node-fallback:${error.code ?? error.message}`;
+async function collectEntriesWithNode(context) {
+  for await (const task of planFileScans(context)) {
+    if (task.kind === 'cached') {
+      addCachedTask(task, context);
+    } else if (task.kind === 'tail') {
+      await scanTailTask(task, context);
+    } else {
+      const scan = await scanFileRange(
+        task.file,
+        task.sessionInfo,
+        context.dateKeyer,
+        0,
+        undefined,
+        context.billingThresholds,
+        task.st.size,
+      );
+      finalizeFullScanTask(task, scan, context);
     }
-  }
-
-  options.stats.discoveryMode ??= 'node';
-  for await (const file of walkJsonl(root)) {
-    yield { path: file };
   }
 }
 
-async function* discoverJsonlFilesWithFind(root) {
-  try {
-    await stat(root);
-  } catch {
+async function collectEntriesWithGrepBatch(context) {
+  const fullScanTasks = [];
+  for await (const task of planFileScans(context)) {
+    if (task.kind === 'cached') {
+      addCachedTask(task, context);
+    } else if (task.kind === 'tail') {
+      await scanTailTask(task, context);
+    } else {
+      fullScanTasks.push(task);
+    }
+  }
+
+  if (fullScanTasks.length === 0) {
     return;
   }
-  const child = spawn(
-    'find',
-    [
-      root,
-      '(',
-      '-type',
-      'f',
-      '-name',
-      '*.jsonl',
-      '-printf',
-      'f\\037%p\\037%D\\037%i\\037%s\\037%T@\\036',
-      ')',
-      '-o',
-      '(',
-      '-type',
-      'l',
-      '-name',
-      '*.jsonl',
-      '-xtype',
-      'f',
-      '-printf',
-      'l\\037%p\\0370\\0370\\0370\\0370\\036',
-      ')',
-    ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
+
+  let scans;
+  try {
+    scans = await scanFilesWithGrepBatch(fullScanTasks, context.dateKeyer, context.billingThresholds);
+  } catch (error) {
+    context.stats.nativeBatchFallback = true;
+    context.stats.nativeBatchFallbackReason = error?.message ?? String(error);
+    scans = await scanFilesWithNode(fullScanTasks, context.dateKeyer, context.billingThresholds);
+  }
+  for (const task of fullScanTasks) {
+    const scan = scans.get(task.file) ?? createFileScan(undefined, 'grep-batch');
+    scan.endedWithNewline = await fileEndsWithNewline(task.file, task.st.size);
+    finalizeFullScanTask(task, scan, context);
+  }
+}
+
+async function* planFileScans(context) {
+  for await (const discovered of discoverJsonlFiles(context.sessionsDir, { mode: context.discoveryMode, stats: context.stats })) {
+    const file = discovered.path;
+    const st = discovered.stat ?? (await stat(file));
+    context.stats.filesSeen += 1;
+    context.stats.bytesSeen += st.size;
+
+    const sessionInfo = makeSessionInfo(file, context.sessionsDir);
+    const oldEntry = context.useCache ? context.cache.files[file] : undefined;
+
+    if (oldEntry && sameFile(st, oldEntry)) {
+      yield { kind: 'cached', file, st, sessionInfo, oldEntry };
+    } else if (oldEntry && appendableFile(st, oldEntry)) {
+      yield { kind: 'tail', file, st, sessionInfo, oldEntry };
+    } else {
+      yield { kind: 'full', file, st, sessionInfo, oldEntry };
+    }
+  }
+}
+
+function addCachedTask(task, context) {
+  context.nextFiles[task.file] = task.oldEntry;
+  context.stats.filesFromCache += 1;
+  context.stats.bytesSkippedByCache += task.st.size;
+  addEntryToAggregate(task.oldEntry, context.aggregate, { since: context.since, until: context.until });
+}
+
+async function scanTailTask(task, context) {
+  context.stats.cacheDirty = true;
+  const tail = await scanFileRange(
+    task.file,
+    task.sessionInfo,
+    context.dateKeyer,
+    task.oldEntry.size,
+    task.oldEntry.state,
+    context.billingThresholds,
+    task.st.size - task.oldEntry.size,
   );
-  let stderr = '';
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (chunk) => {
-    stderr = `${stderr}${chunk}`.slice(-4096);
-  });
-  const closed = new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('close', (code, signal) => resolve({ code, signal }));
-  });
-
-  let buffer = '';
-  for await (const chunk of child.stdout) {
-    buffer += chunk.toString('utf8');
-    for (;;) {
-      const index = buffer.indexOf(FIND_RECORD_SEPARATOR);
-      if (index === -1) {
-        break;
-      }
-      const record = buffer.slice(0, index);
-      buffer = buffer.slice(index + FIND_RECORD_SEPARATOR.length);
-      const entry = parseFindRecord(record);
-      if (entry) {
-        yield entry;
-      }
-    }
-  }
-  if (buffer) {
-    const entry = parseFindRecord(buffer);
-    if (entry) {
-      yield entry;
-    }
-  }
-  const status = await closed;
-  if (status.code !== 0) {
-    throw new Error(`find exited with ${status.signal ?? status.code}: ${stderr.trim()}`);
-  }
+  const entry = finalizeCacheEntry(task.st, mergeEntries(task.oldEntry, tail), task.file);
+  context.nextFiles[task.file] = entry;
+  context.stats.filesScannedTail += 1;
+  context.stats.bytesRead += tail.stats.bytesRead;
+  context.stats.bytesSkippedByTailCache += task.oldEntry.size;
+  addScanStats(context.stats, tail.stats);
+  addEntryToAggregate(entry, context.aggregate, { since: context.since, until: context.until });
 }
 
-function parseFindRecord(record) {
-  if (!record) {
-    return null;
+function finalizeFullScanTask(task, scan, context) {
+  context.stats.cacheDirty = true;
+  scan.stats.bytesRead ||= task.st.size;
+  const entry = finalizeCacheEntry(task.st, scan, task.file);
+  context.nextFiles[task.file] = entry;
+  context.stats.filesScannedFull += 1;
+  context.stats.bytesRead += scan.stats.bytesRead;
+  addScanStats(context.stats, scan.stats);
+  if (task.oldEntry) {
+    context.stats.filesCacheStale += 1;
+  } else {
+    context.stats.filesCacheMiss += 1;
   }
-  const parts = record.split(FIND_FIELD_SEPARATOR);
-  if (parts.length !== 6 || !parts[1]) {
-    return null;
-  }
-  const kind = parts[0];
+  addEntryToAggregate(entry, context.aggregate, { since: context.since, until: context.until });
+}
+
+function createFileScan(initialState = undefined, scannerMode = 'needle') {
   return {
-    path: parts[1],
-    stat:
-      kind === 'f'
-        ? {
-            dev: Number(parts[2]),
-            ino: Number(parts[3]),
-            size: Number(parts[4]),
-            mtimeMs: Number(parts[5]) * 1000,
-          }
-        : undefined,
-  };
-}
-
-async function* walkJsonl(root) {
-  let dir;
-  try {
-    dir = await opendir(root);
-  } catch {
-    return;
-  }
-  for await (const entry of dir) {
-    const full = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      yield* walkJsonl(full);
-    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-      yield full;
-    } else if (entry.isSymbolicLink() && entry.name.endsWith('.jsonl')) {
-      try {
-        if ((await stat(full)).isFile()) {
-          yield full;
-        }
-      } catch {
-        // Broken symlinks are not Codex session files.
-      }
-    }
-  }
-}
-
-async function scanFileRange(file, sessionInfo, timezone, start = 0, initialState = undefined, billingThresholds = DEFAULT_BILLING_THRESHOLDS) {
-  const dateFormatter = createDateKeyFormatter(timezone);
-  const scan = {
     daily: {},
     sessionsByDate: {},
     billing: { daily: {}, sessionsByDate: {} },
@@ -439,16 +443,248 @@ async function scanFileRange(file, sessionInfo, timezone, start = 0, initialStat
     },
     endedWithNewline: true,
     stats: {
+      scannerMode,
       bytesRead: 0,
+      nativeOutputBytes: 0,
       linesSeen: 0,
+      candidateLinesSeen: 0,
       linesParsed: 0,
+      linesFastParsed: 0,
+      linesJsonParsed: 0,
       tokenEvents: 0,
     },
   };
+}
+
+async function scanFilesWithGrepBatch(tasks, dateKeyer, billingThresholds) {
+  if (process.env.CDXUSAGE_FORCE_NATIVE_BATCH_FAIL === '1') {
+    throw new Error('forced native batch failure');
+  }
+  const scans = new Map();
+  const contexts = new Map();
+  for (const task of tasks) {
+    const scan = createFileScan(undefined, 'grep-batch');
+    scan.stats.bytesRead = task.st.size;
+    scans.set(task.file, scan);
+    contexts.set(task.file, {
+      scan,
+      sessionInfo: task.sessionInfo,
+      dateKeyer,
+      billingThresholds,
+    });
+  }
+
+  const child = spawn(
+    'xargs',
+    [
+      '-0',
+      '-r',
+      'perl',
+      '-Mbytes',
+      '-ne',
+      NATIVE_BATCH_PERL_SCRIPT,
+      '--',
+    ],
+    { stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => {
+    stderr = `${stderr}${chunk}`.slice(-4096);
+  });
+  const getStdinError = trackWritableError(child.stdin);
+  const closed = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({ code, signal }));
+  });
+  const outputConsumed = consumeGrepBatchOutput(child.stdout, contexts);
+
+  try {
+    await writeNativeBatchInput(child.stdin, tasks, getStdinError);
+  } catch (error) {
+    child.stdin.destroy();
+    await Promise.allSettled([outputConsumed, closed]);
+    throw error;
+  }
+
+  await outputConsumed;
+  const status = await closed;
+  if (status.code !== 0) {
+    throw new Error(`xargs/perl exited with ${status.signal ?? status.code}: ${stderr.trim()}`);
+  }
+  for (const task of tasks) {
+    const scan = scans.get(task.file);
+    if (!scan) {
+      continue;
+    }
+    const context = contexts.get(task.file);
+    scan.stats.linesSeen = context?.sourceLinesSeen ?? scan.stats.linesSeen;
+  }
+  return scans;
+}
+
+function canUseNativeBatchScanner() {
+  if (process.platform !== 'linux') {
+    return false;
+  }
+  nativeBatchCapabilityPromise ??= Promise.all([
+    commandSucceeds('perl', ['-Mbytes', '-e', '']),
+    commandSucceeds('xargs', ['-r', 'true']),
+  ]).then((results) => results.every(Boolean));
+  return nativeBatchCapabilityPromise;
+}
+
+function commandSucceeds(command, args) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'ignore', 'ignore'] });
+    child.once('error', () => resolve(false));
+    child.once('close', (code) => resolve(code === 0));
+  });
+}
+
+function trackWritableError(stream) {
+  let streamError = null;
+  stream.on('error', (error) => {
+    streamError ??= error;
+  });
+  return () => streamError;
+}
+
+async function writeNativeBatchInput(stdin, tasks, getStreamError = () => null) {
+  for (const task of tasks) {
+    const streamError = getStreamError();
+    if (streamError) {
+      throw streamError;
+    }
+    if (!stdin.write(`${task.file}\0`)) {
+      await waitForDrainOrError(stdin, getStreamError);
+    }
+  }
+  const streamError = getStreamError();
+  if (streamError) {
+    throw streamError;
+  }
+  stdin.end();
+}
+
+function waitForDrainOrError(stream, getStreamError) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      stream.off('drain', onDrain);
+      stream.off('error', onError);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const streamError = getStreamError();
+    if (streamError) {
+      reject(streamError);
+      return;
+    }
+    stream.once('drain', onDrain);
+    stream.once('error', onError);
+  });
+}
+
+async function consumeGrepBatchOutput(stdout, contexts) {
+  let buffer = Buffer.alloc(0);
+  let parts = [];
+  for await (const chunk of stdout) {
+    buffer = buffer.length > 0 ? Buffer.concat([buffer, chunk]) : chunk;
+    for (;;) {
+      const nul = buffer.indexOf(0);
+      if (nul === -1) {
+        break;
+      }
+      parts.push(buffer.subarray(0, nul));
+      buffer = buffer.subarray(nul + 1);
+      while (parts.length >= 3) {
+        const [typeBuf, fileBuf, payload] = parts.splice(0, 3);
+        const type = typeBuf.toString('utf8');
+        const file = fileBuf.toString('utf8');
+        const context = contexts.get(file);
+        if (!context) {
+          continue;
+        }
+        if (type === 'L') {
+          context.scan.stats.nativeOutputBytes += payload.length;
+          processLine(payload, context);
+        } else if (type === 'C') {
+          const parsed = Number(payload.toString('utf8'));
+          if (Number.isFinite(parsed)) {
+            context.sourceLinesSeen = parsed;
+          }
+        }
+      }
+    }
+  }
+}
+
+async function scanFilesWithNode(tasks, dateKeyer, billingThresholds) {
+  const scans = new Map();
+  for (const task of tasks) {
+    scans.set(
+      task.file,
+      await scanFileRange(task.file, task.sessionInfo, dateKeyer, 0, undefined, billingThresholds, task.st.size),
+    );
+  }
+  return scans;
+}
+
+async function scanFileRange(
+  file,
+  sessionInfo,
+  dateKeyer,
+  start = 0,
+  initialState = undefined,
+  billingThresholds = DEFAULT_BILLING_THRESHOLDS,
+  sourceBytes = undefined,
+) {
+  const scan = createFileScan(initialState, process.env.CDXUSAGE_SCAN_MODE === 'line' ? 'line' : 'needle');
   let carry = Buffer.alloc(0);
   let lastByte;
-  const stream = createReadStream(file, { start, highWaterMark: 1024 * 1024 });
 
+  if (process.env.CDXUSAGE_SCAN_MODE === 'grep' && start === 0) {
+    scan.stats.scannerMode = 'grep';
+    await scanFileWithGrep(file, scan, {
+      scan,
+      sessionInfo,
+      dateKeyer,
+      billingThresholds,
+      sourceBytes,
+    });
+    return scan;
+  }
+
+  const stream = createReadStream(file, { start, highWaterMark: 4 * 1024 * 1024 });
+
+  if (scan.stats.scannerMode === 'line') {
+    await scanStreamByLine(stream, scan, {
+      scan,
+      sessionInfo,
+      dateKeyer,
+      billingThresholds,
+    });
+    return scan;
+  }
+
+  await scanStreamByNeedle(stream, scan, {
+    scan,
+    sessionInfo,
+    dateKeyer,
+    billingThresholds,
+  });
+  return scan;
+}
+
+async function scanStreamByLine(stream, scan, context) {
+  let carry = Buffer.alloc(0);
+  let lastByte;
   for await (const chunk of stream) {
     scan.stats.bytesRead += chunk.length;
     if (chunk.length > 0) {
@@ -465,27 +701,180 @@ async function scanFileRange(file, sessionInfo, timezone, start = 0, initialStat
       if (lineEnd > lineStart && buf[lineEnd - 1] === 13) {
         lineEnd -= 1;
       }
-      processLine(buf.subarray(lineStart, lineEnd), { scan, sessionInfo, dateFormatter, billingThresholds });
+      scan.stats.linesSeen += 1;
+      processLine(buf.subarray(lineStart, lineEnd), context);
       lineStart = newline + 1;
     }
     carry = lineStart < buf.length ? Buffer.from(buf.subarray(lineStart)) : Buffer.alloc(0);
   }
 
   if (carry.length > 0) {
-    processLine(carry, { scan, sessionInfo, dateFormatter, billingThresholds });
+    scan.stats.linesSeen += 1;
+    processLine(carry, context);
   }
   scan.endedWithNewline = scan.stats.bytesRead === 0 || lastByte === 10;
-  return scan;
+}
+
+async function scanFileWithGrep(file, scan, context) {
+  scan.stats.bytesRead = context.sourceBytes ?? 0;
+  const child = spawn('grep', ['-aF', '-e', 'token_count', '-e', 'turn_context', '--', file], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => {
+    stderr = `${stderr}${chunk}`.slice(-4096);
+  });
+  const closed = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({ code, signal }));
+  });
+
+  let carry = Buffer.alloc(0);
+  for await (const chunk of child.stdout) {
+    scan.stats.nativeOutputBytes += chunk.length;
+    const buf = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk;
+    let lineStart = 0;
+    for (;;) {
+      const newline = buf.indexOf(10, lineStart);
+      if (newline === -1) {
+        break;
+      }
+      let lineEnd = newline;
+      if (lineEnd > lineStart && buf[lineEnd - 1] === 13) {
+        lineEnd -= 1;
+      }
+      processLine(buf.subarray(lineStart, lineEnd), context);
+      lineStart = newline + 1;
+    }
+    carry = lineStart < buf.length ? Buffer.from(buf.subarray(lineStart)) : Buffer.alloc(0);
+  }
+  if (carry.length > 0) {
+    processLine(carry, context);
+  }
+  scan.stats.linesSeen = scan.stats.candidateLinesSeen;
+
+  const status = await closed;
+  if (status.code !== 0 && status.code !== 1) {
+    throw new Error(`grep exited with ${status.signal ?? status.code}: ${stderr.trim()}`);
+  }
+  scan.endedWithNewline = await fileEndsWithNewline(file, context.sourceBytes);
+}
+
+async function fileEndsWithNewline(file, size = undefined) {
+  if (!Number.isFinite(size) || size <= 0) {
+    return true;
+  }
+  let handle;
+  try {
+    handle = await open(file, 'r');
+    const buffer = Buffer.allocUnsafe(1);
+    const result = await handle.read(buffer, 0, 1, size - 1);
+    return result.bytesRead === 0 || buffer[0] === 10;
+  } catch {
+    return true;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+async function scanStreamByNeedle(stream, scan, context) {
+  let carry = Buffer.alloc(0);
+  let lastByte;
+  for await (const chunk of stream) {
+    scan.stats.bytesRead += chunk.length;
+    if (chunk.length > 0) {
+      lastByte = chunk[chunk.length - 1];
+    }
+    const buf = carry.length > 0 ? Buffer.concat([carry, chunk]) : chunk;
+    const completeEnd = buf.lastIndexOf(10) + 1;
+    if (completeEnd === 0) {
+      carry = Buffer.from(buf);
+      continue;
+    }
+
+    scan.stats.linesSeen += countByte(buf, 10, 0, completeEnd);
+    for (const lineStart of collectNeedleLineStarts(buf, completeEnd)) {
+      let lineEnd = buf.indexOf(10, lineStart);
+      if (lineEnd === -1 || lineEnd > completeEnd) {
+        lineEnd = completeEnd;
+      }
+      if (lineEnd > lineStart && buf[lineEnd - 1] === 13) {
+        lineEnd -= 1;
+      }
+      processLine(buf.subarray(lineStart, lineEnd), context);
+    }
+    carry = completeEnd < buf.length ? Buffer.from(buf.subarray(completeEnd)) : Buffer.alloc(0);
+  }
+
+  if (carry.length > 0 && lineHasNeedle(carry)) {
+    scan.stats.linesSeen += 1;
+    processLine(carry, context);
+  } else if (carry.length > 0) {
+    scan.stats.linesSeen += 1;
+  }
+  scan.endedWithNewline = scan.stats.bytesRead === 0 || lastByte === 10;
+}
+
+function collectNeedleLineStarts(buf, end) {
+  const starts = new Set();
+  for (const needle of SCAN_NEEDLES) {
+    let offset = 0;
+    for (;;) {
+      const hit = buf.indexOf(needle, offset);
+      if (hit === -1 || hit >= end) {
+        break;
+      }
+      const newline = buf.lastIndexOf(10, hit);
+      starts.add(newline === -1 ? 0 : newline + 1);
+      offset = hit + needle.length;
+    }
+  }
+  return [...starts].sort((a, b) => a - b);
+}
+
+function lineHasNeedle(line) {
+  return line.includes(TOKEN_NEEDLE) || line.includes(TURN_NEEDLE);
+}
+
+function countByte(buf, byte, start = 0, end = buf.length) {
+  let count = 0;
+  for (let offset = start; offset < end; offset += 1) {
+    if (buf[offset] === byte) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function parseTokenLineJson(line) {
+  let entry;
+  try {
+    entry = JSON.parse(line.toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (entry?.type !== 'event_msg' || entry?.payload?.type !== 'token_count' || !entry.timestamp) {
+    return null;
+  }
+  const info = entry.payload.info ?? {};
+  return {
+    fast: false,
+    timestamp: entry.timestamp,
+    model: extractModel(entry.payload, info),
+    lastUsage: normalizeRawUsage(info.last_token_usage),
+    totalUsage: normalizeRawUsage(info.total_token_usage),
+  };
 }
 
 function processLine(line, context) {
-  const { scan, sessionInfo, dateFormatter } = context;
+  const { scan, sessionInfo, dateKeyer } = context;
   const billingThresholds = context.billingThresholds ?? DEFAULT_BILLING_THRESHOLDS;
-  scan.stats.linesSeen += 1;
   if (line.length === 0) {
     return;
   }
   if (line.includes(TURN_NEEDLE)) {
+    scan.stats.candidateLinesSeen += 1;
     const model = extractTurnModelFast(line);
     if (model) {
       scan.state.currentModel = model;
@@ -496,21 +885,20 @@ function processLine(line, context) {
   if (!line.includes(TOKEN_NEEDLE)) {
     return;
   }
+  scan.stats.candidateLinesSeen += 1;
 
-  let entry;
-  try {
-    entry = JSON.parse(line.toString('utf8'));
-  } catch {
+  const parsed = parseTokenLineJson(line);
+  if (!parsed) {
     return;
+  }
+  if (parsed.fast) {
+    scan.stats.linesFastParsed += 1;
+  } else {
+    scan.stats.linesJsonParsed += 1;
   }
   scan.stats.linesParsed += 1;
-  if (entry?.type !== 'event_msg' || entry?.payload?.type !== 'token_count' || !entry.timestamp) {
-    return;
-  }
-
-  const info = entry.payload.info ?? {};
-  const lastUsage = normalizeRawUsage(info.last_token_usage);
-  const totalUsage = normalizeRawUsage(info.total_token_usage);
+  const lastUsage = parsed.lastUsage;
+  const totalUsage = parsed.totalUsage;
   let raw = lastUsage;
   if (!raw && totalUsage) {
     raw = subtractRawUsage(totalUsage, scan.state.previousTotals);
@@ -541,7 +929,7 @@ function processLine(line, context) {
     return;
   }
 
-  const extractedModel = extractModel({ ...entry.payload, info });
+  const extractedModel = parsed.model;
   let isFallback = false;
   if (extractedModel) {
     scan.state.currentModel = extractedModel;
@@ -557,7 +945,8 @@ function processLine(line, context) {
     isFallback = true;
   }
 
-  const date = toDateKey(entry.timestamp, dateFormatter);
+  const date = toDateKey(parsed.timestamp, dateKeyer);
+  const activityTimestamp = toActivityTimestamp(parsed.timestamp);
   const day = scan.daily[date] ?? { ...emptyUsage(), models: {} };
   scan.daily[date] = day;
   addUsage(day, delta);
@@ -569,13 +958,13 @@ function processLine(line, context) {
     sessionId: sessionInfo.sessionId,
     sessionFile: sessionInfo.sessionFile,
     directory: sessionInfo.directory,
-    lastActivity: entry.timestamp,
+    lastActivity: activityTimestamp,
     ...emptyUsage(),
     models: {},
   };
   sessionDay[sessionInfo.sessionId] = session;
-  if (entry.timestamp > session.lastActivity) {
-    session.lastActivity = entry.timestamp;
+  if (compareActivityTimestamp(activityTimestamp, session.lastActivity) > 0) {
+    session.lastActivity = activityTimestamp;
   }
   addUsage(session, delta);
   addModelUsage(session.models, model, delta, isFallback);
@@ -591,7 +980,7 @@ function buildReport(aggregate, stats, nextFiles) {
     .map(([key, usage]) => ({ key, ...usage }));
   const { rows: monthly, billing: monthlyBilling } = buildMonthlyRows(daily, aggregate.billing.daily);
   const sessions = [...aggregate.sessions.entries()]
-    .sort(([, a], [, b]) => a.lastActivity.localeCompare(b.lastActivity))
+    .sort(([, a], [, b]) => compareActivityTimestamp(a.lastActivity, b.lastActivity))
     .map(([, session]) => ({ ...session }));
   const totals = emptyUsage();
   for (const day of daily) {
@@ -663,17 +1052,18 @@ function addEntryToAggregate(entry, aggregate, filters) {
       continue;
     }
     for (const [sessionId, session] of Object.entries(sessions ?? {})) {
+      const sessionLastActivity = toActivityTimestamp(session.lastActivity);
       const target = aggregate.sessions.get(sessionId) ?? {
         sessionId,
         sessionFile: session.sessionFile,
         directory: session.directory,
-        lastActivity: session.lastActivity,
+        lastActivity: sessionLastActivity,
         ...emptyUsage(),
         models: {},
       };
       aggregate.sessions.set(sessionId, target);
-      if (session.lastActivity > target.lastActivity) {
-        target.lastActivity = session.lastActivity;
+      if (compareActivityTimestamp(sessionLastActivity, target.lastActivity) > 0) {
+        target.lastActivity = sessionLastActivity;
       }
       addUsage(target, session);
       for (const [model, modelUsage] of Object.entries(session.models ?? {})) {
@@ -746,8 +1136,12 @@ function mergeEntries(base, tail) {
     stats: {
       bytesRead: (base.stats?.bytesRead ?? base.size ?? 0) + tail.stats.bytesRead,
       linesSeen: (base.stats?.linesSeen ?? 0) + tail.stats.linesSeen,
+      candidateLinesSeen: (base.stats?.candidateLinesSeen ?? 0) + (tail.stats.candidateLinesSeen ?? 0),
       linesParsed: (base.stats?.linesParsed ?? 0) + tail.stats.linesParsed,
+      linesFastParsed: (base.stats?.linesFastParsed ?? 0) + (tail.stats.linesFastParsed ?? 0),
+      linesJsonParsed: (base.stats?.linesJsonParsed ?? 0) + (tail.stats.linesJsonParsed ?? 0),
       tokenEvents: (base.stats?.tokenEvents ?? 0) + tail.stats.tokenEvents,
+      nativeOutputBytes: (base.stats?.nativeOutputBytes ?? 0) + (tail.stats.nativeOutputBytes ?? 0),
     },
   };
 }
@@ -777,19 +1171,28 @@ function createStats(cache, timezone, billingThresholds = DEFAULT_BILLING_THRESH
     filesCacheMiss: 0,
     filesCacheStale: 0,
     linesSeen: 0,
+    candidateLinesSeen: 0,
     linesParsed: 0,
+    linesFastParsed: 0,
+    linesJsonParsed: 0,
     tokenEvents: 0,
     bytesSeen: 0,
     bytesRead: 0,
+    nativeOutputBytes: 0,
     bytesSkippedByMtime: 0,
     bytesSkippedByPathDate: 0,
     bytesSkippedByCache: 0,
     bytesSkippedByTailCache: 0,
     cacheEntriesLoaded: Object.keys(cache.files).length,
     cacheEntriesSaved: 0,
+    cacheDirty: false,
     cacheSaveSkippedByError: false,
     cacheSaveError: null,
+    cacheSaveSkippedUnchanged: false,
+    nativeBatchFallback: false,
+    nativeBatchFallbackReason: null,
     discoveryMode: null,
+    scannerModes: {},
   };
 }
 
@@ -817,17 +1220,67 @@ function extractTurnModelFast(line) {
   }
 }
 
-function createDateKeyFormatter(timezone) {
-  return new Intl.DateTimeFormat('en-CA', {
+function createDateKeyer(timezone) {
+  const safe = safeTimeZone(timezone);
+  if (safe === 'UTC') {
+    return (timestamp) => {
+      if (isUtcIsoTimestamp(timestamp)) {
+        return timestamp.slice(0, 10);
+      }
+      return new Date(timestamp).toISOString().slice(0, 10);
+    };
+  }
+  const formatter = new Intl.DateTimeFormat('en-CA', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    timeZone: safeTimeZone(timezone),
+    timeZone: safe,
   });
+  return (timestamp) => formatter.format(new Date(timestamp));
 }
 
-function toDateKey(timestamp, formatter) {
-  return formatter.format(new Date(timestamp));
+function isUtcIsoTimestamp(value) {
+  return (
+    typeof value === 'string' &&
+    value.length >= 20 &&
+    value[4] === '-' &&
+    value[7] === '-' &&
+    value[10] === 'T' &&
+    value.endsWith('Z')
+  );
+}
+
+function isCanonicalUtcTimestamp(value) {
+  return (
+    typeof value === 'string' &&
+    value.length === 24 &&
+    value[4] === '-' &&
+    value[7] === '-' &&
+    value[10] === 'T' &&
+    value[13] === ':' &&
+    value[16] === ':' &&
+    value[19] === '.' &&
+    value.endsWith('Z')
+  );
+}
+
+function toActivityTimestamp(timestamp) {
+  if (isCanonicalUtcTimestamp(timestamp)) {
+    return timestamp;
+  }
+  const ms = Date.parse(timestamp);
+  if (Number.isFinite(ms)) {
+    return new Date(ms).toISOString();
+  }
+  return String(timestamp ?? '');
+}
+
+function compareActivityTimestamp(left, right) {
+  return toActivityTimestamp(left).localeCompare(toActivityTimestamp(right));
+}
+
+function toDateKey(timestamp, dateKeyer) {
+  return dateKeyer(timestamp);
 }
 
 export function toMonthKey(dateKey) {
@@ -934,13 +1387,15 @@ async function saveCacheFile(cacheFile, cache, maxCacheBytes) {
     await rename(tmp, cacheFile);
     return { saved: true, bytes };
   } catch (error) {
-    await unlink(tmp).catch(() => {});
     if (error instanceof CacheTooLargeError) {
-      stream.end();
+      stream.destroy();
       await finished(stream).catch(() => {});
+      await unlink(tmp).catch(() => {});
       return { saved: false, bytes: error.bytes };
     }
     stream.destroy();
+    await finished(stream).catch(() => {});
+    await unlink(tmp).catch(() => {});
     throw error;
   }
 }
@@ -1008,9 +1463,16 @@ function normalizeCacheByteLimit(value) {
 }
 
 function addScanStats(target, scanStats) {
+  if (scanStats.scannerMode) {
+    target.scannerModes[scanStats.scannerMode] = (target.scannerModes[scanStats.scannerMode] ?? 0) + 1;
+  }
   target.linesSeen += scanStats.linesSeen;
+  target.candidateLinesSeen += scanStats.candidateLinesSeen ?? 0;
   target.linesParsed += scanStats.linesParsed;
+  target.linesFastParsed += scanStats.linesFastParsed ?? 0;
+  target.linesJsonParsed += scanStats.linesJsonParsed ?? 0;
   target.tokenEvents += scanStats.tokenEvents;
+  target.nativeOutputBytes += scanStats.nativeOutputBytes ?? 0;
 }
 
 function emptyUsage() {
@@ -1121,6 +1583,10 @@ function mergeSessionsByDate(target, source) {
 function addBillingSummary(target, key, model, delta, billingThresholds = DEFAULT_BILLING_THRESHOLDS) {
   const row = target[key] ?? {};
   target[key] = row;
+  addBillingSummaryForModel(row, model, delta, billingThresholds);
+}
+
+function addBillingSummaryForModel(row, model, delta, billingThresholds = DEFAULT_BILLING_THRESHOLDS) {
   const summary = row[model] ?? {
     version: 1,
     count: 0,
@@ -1159,9 +1625,7 @@ function addSessionBillingSummary(target, date, sessionId, model, delta, billing
   target[date] = day;
   const session = day[sessionId] ?? {};
   day[sessionId] = session;
-  const modelSummary = {};
-  addBillingSummary(modelSummary, 'row', model, delta, billingThresholds);
-  session[model] = mergeBillingSummary(session[model], modelSummary.row[model]);
+  addBillingSummaryForModel(session, model, delta, billingThresholds);
 }
 
 function cloneBillingByKey(source) {
@@ -1300,11 +1764,11 @@ function addRawUsage(previous, delta) {
   };
 }
 
-function extractModel(value) {
+function extractModel(value, infoOverride = undefined) {
   if (!value || typeof value !== 'object') {
     return undefined;
   }
-  const info = value.info;
+  const info = infoOverride ?? value.info;
   if (info && typeof info === 'object') {
     const direct = nonEmpty(info.model) ?? nonEmpty(info.model_name);
     if (direct) {

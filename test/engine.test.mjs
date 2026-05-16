@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { appendFile, mkdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { collectUsage, normalizeDate } from '../src/engine.mjs';
@@ -154,6 +154,41 @@ const losAngelesReport = await collectUsage({
   pricingData,
 });
 assert.equal(losAngelesReport.daily[0].key, '2026-05-15');
+
+const offsetTimestampHome = path.join(root, 'offset-timestamp-codex-home');
+const offsetTimestampSessions = path.join(offsetTimestampHome, 'sessions/2026/05/16');
+await mkdir(offsetTimestampSessions, { recursive: true });
+await writeFile(
+  path.join(offsetTimestampSessions, 'offset-timestamp.jsonl'),
+  [
+    JSON.stringify({ timestamp: '2026-05-17T00:30:00+02:00', type: 'turn_context', payload: { model: 'gpt-test' } }),
+    JSON.stringify({
+      timestamp: '2026-05-17T00:30:00+02:00',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, total_tokens: 2 } },
+      },
+    }),
+    JSON.stringify({
+      timestamp: '2026-05-16T23:00:00.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 2, cached_input_tokens: 0, output_tokens: 1, total_tokens: 3 } },
+      },
+    }),
+    '',
+  ].join('\n'),
+);
+const offsetTimestampReport = await collectUsage({
+  codexHome: offsetTimestampHome,
+  cacheFile: path.join(root, 'offset-timestamp-cache.json'),
+  timezone: 'UTC',
+  pricingData,
+});
+assert.deepEqual(offsetTimestampReport.daily.map((row) => row.key), ['2026-05-16']);
+assert.equal(offsetTimestampReport.sessions[0].lastActivity, '2026-05-16T23:00:00.000Z');
 
 const staleMtimeHome = path.join(root, 'stale-mtime-codex-home');
 const staleMtimeSessions = path.join(staleMtimeHome, 'sessions/2026/05/16');
@@ -337,6 +372,191 @@ assert.equal(mixed.totals.cachedInputTokens, 8);
 assert.equal(mixed.totals.outputTokens, 4);
 assert.equal(mixed.totals.totalTokens, 19);
 
+const lineStatsHome = path.join(root, 'line-stats-codex-home');
+const lineStatsSessions = path.join(lineStatsHome, 'sessions/2026/05/16');
+const lineStatsFile = path.join(lineStatsSessions, 'line-stats.jsonl');
+const lineStatsCache = path.join(root, 'line-stats-cache.json');
+await mkdir(lineStatsSessions, { recursive: true });
+await writeFile(
+  lineStatsFile,
+  [
+    JSON.stringify({ timestamp: '2026-05-16T00:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-test' } }),
+    JSON.stringify({ timestamp: '2026-05-16T00:00:01.000Z', type: 'event_msg', payload: { type: 'non_token' } }),
+    JSON.stringify({
+      timestamp: '2026-05-16T00:00:02.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 2, cached_input_tokens: 0, output_tokens: 1, total_tokens: 3 } },
+      },
+    }),
+    '',
+  ].join('\n'),
+);
+const lineStatsCold = await collectUsage({
+  codexHome: lineStatsHome,
+  cacheFile: lineStatsCache,
+  timezone: 'UTC',
+  pricingData,
+});
+assert.equal(lineStatsCold.totals.totalTokens, 3);
+assert.equal(lineStatsCold.stats.linesSeen, 3);
+assert.equal(lineStatsCold.stats.candidateLinesSeen, 2);
+await appendFile(
+  lineStatsFile,
+  [
+    JSON.stringify({ timestamp: '2026-05-16T00:00:03.000Z', type: 'event_msg', payload: { type: 'non_token' } }),
+    JSON.stringify({
+      timestamp: '2026-05-16T00:00:04.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, total_tokens: 2 } },
+      },
+    }),
+    '',
+  ].join('\n'),
+);
+const lineStatsTail = await collectUsage({
+  codexHome: lineStatsHome,
+  cacheFile: lineStatsCache,
+  timezone: 'UTC',
+  pricingData,
+});
+assert.equal(lineStatsTail.totals.totalTokens, 5);
+assert.equal(lineStatsTail.stats.filesScannedTail, 1);
+assert.equal(lineStatsTail.stats.linesSeen, 2);
+assert.equal(lineStatsTail.stats.candidateLinesSeen, 1);
+
+const noFinalNewlineHome = path.join(root, 'no-final-newline-codex-home');
+const noFinalNewlineSessions = path.join(noFinalNewlineHome, 'sessions/2026/05/16');
+const noFinalNewlineFile = path.join(noFinalNewlineSessions, 'no-final-newline.jsonl');
+const noFinalNewlineCache = path.join(root, 'no-final-newline-cache.json');
+await mkdir(noFinalNewlineSessions, { recursive: true });
+await writeFile(
+  noFinalNewlineFile,
+  [
+    JSON.stringify({ timestamp: '2026-05-16T00:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-test' } }),
+    JSON.stringify({
+      timestamp: '2026-05-16T00:00:01.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 2, cached_input_tokens: 0, output_tokens: 1, total_tokens: 3 } },
+      },
+    }),
+  ].join('\n'),
+);
+const noFinalNewline = await collectUsage({
+  codexHome: noFinalNewlineHome,
+  cacheFile: noFinalNewlineCache,
+  timezone: 'UTC',
+  pricingData,
+});
+const noFinalNewlineCachePayload = JSON.parse(await readFile(noFinalNewlineCache, 'utf8'));
+assert.equal(noFinalNewline.totals.totalTokens, 3);
+assert.equal(noFinalNewline.stats.linesSeen, 2);
+assert.equal(noFinalNewlineCachePayload.files[noFinalNewlineFile].endedWithNewline, false);
+
+const nativeFallbackHome = path.join(root, 'native-fallback-codex-home');
+const nativeFallbackSessions = path.join(nativeFallbackHome, 'sessions/2026/05/16');
+await mkdir(nativeFallbackSessions, { recursive: true });
+await writeFile(
+  path.join(nativeFallbackSessions, 'native-fallback.jsonl'),
+  [
+    JSON.stringify({ timestamp: '2026-05-16T00:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-test' } }),
+    JSON.stringify({ timestamp: '2026-05-16T00:00:01.000Z', type: 'event_msg', payload: { type: 'non_token' } }),
+    JSON.stringify({
+      timestamp: '2026-05-16T00:00:02.000Z',
+      type: 'event_msg',
+      payload: {
+        type: 'token_count',
+        info: { last_token_usage: { input_tokens: 3, cached_input_tokens: 0, output_tokens: 2, total_tokens: 5 } },
+      },
+    }),
+    '',
+  ].join('\n'),
+);
+const previousScanMode = process.env.CDXUSAGE_SCAN_MODE;
+const previousForceNativeFail = process.env.CDXUSAGE_FORCE_NATIVE_BATCH_FAIL;
+process.env.CDXUSAGE_SCAN_MODE = 'grep-batch';
+process.env.CDXUSAGE_FORCE_NATIVE_BATCH_FAIL = '1';
+try {
+  const nativeFallback = await collectUsage({
+    codexHome: nativeFallbackHome,
+    cacheFile: path.join(root, 'native-fallback-cache.json'),
+    timezone: 'UTC',
+    pricingData,
+  });
+  assert.equal(nativeFallback.totals.totalTokens, 5);
+  assert.equal(nativeFallback.stats.nativeBatchFallback, true);
+  assert.equal(nativeFallback.stats.linesSeen, 3);
+  assert.equal(nativeFallback.stats.candidateLinesSeen, 2);
+  assert.equal(nativeFallback.stats.scannerModes.needle, 1);
+} finally {
+  if (previousScanMode == null) {
+    delete process.env.CDXUSAGE_SCAN_MODE;
+  } else {
+    process.env.CDXUSAGE_SCAN_MODE = previousScanMode;
+  }
+  if (previousForceNativeFail == null) {
+    delete process.env.CDXUSAGE_FORCE_NATIVE_BATCH_FAIL;
+  } else {
+    process.env.CDXUSAGE_FORCE_NATIVE_BATCH_FAIL = previousForceNativeFail;
+  }
+}
+
+const nativeEarlyExitHome = path.join(root, 'native-early-exit-codex-home');
+const nativeEarlyExitSessions = path.join(nativeEarlyExitHome, 'sessions/2026/05/16');
+const nativeEarlyExitCache = path.join(root, 'native-early-exit-cache.json');
+await mkdir(nativeEarlyExitSessions, { recursive: true });
+for (let i = 0; i < 3000; i += 1) {
+  await writeFile(
+    path.join(nativeEarlyExitSessions, `native-early-exit-${i}.jsonl`),
+    [
+      JSON.stringify({ timestamp: '2026-05-16T00:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-test' } }),
+      JSON.stringify({
+        timestamp: '2026-05-16T00:00:01.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: { last_token_usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1, total_tokens: 2 } },
+        },
+      }),
+      '',
+    ].join('\n'),
+  );
+}
+const fakeBin = path.join(root, 'fake-native-bin');
+await mkdir(fakeBin, { recursive: true });
+await writeFile(path.join(fakeBin, 'xargs'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+const previousPath = process.env.PATH;
+process.env.CDXUSAGE_SCAN_MODE = 'grep-batch';
+process.env.PATH = `${fakeBin}:${previousPath ?? ''}`;
+try {
+  const nativeEarlyExit = await collectUsage({
+    codexHome: nativeEarlyExitHome,
+    cacheFile: nativeEarlyExitCache,
+    timezone: 'UTC',
+    includePricing: false,
+  });
+  assert.equal(nativeEarlyExit.totals.totalTokens, 6000);
+  assert.equal(nativeEarlyExit.stats.nativeBatchFallback, true);
+  assert.equal(nativeEarlyExit.stats.filesScannedFull, 3000);
+  assert.equal(nativeEarlyExit.stats.scannerModes.needle, 3000);
+} finally {
+  if (previousScanMode == null) {
+    delete process.env.CDXUSAGE_SCAN_MODE;
+  } else {
+    process.env.CDXUSAGE_SCAN_MODE = previousScanMode;
+  }
+  if (previousPath == null) {
+    delete process.env.PATH;
+  } else {
+    process.env.PATH = previousPath;
+  }
+}
+
 const tieredHome = path.join(root, 'tiered-codex-home');
 const tieredSessionsDir = path.join(tieredHome, 'sessions/2026/05/16');
 const tieredCache = path.join(root, 'tiered-cache.json');
@@ -427,8 +647,17 @@ const symlinkReport = await collectUsage({
   discoveryMode: 'find',
   pricingData,
 });
-assert.equal(symlinkReport.totals.totalTokens, 2);
-assert.equal(symlinkReport.stats.filesSeen, 1);
+assert.equal(symlinkReport.totals.totalTokens, 0);
+assert.equal(symlinkReport.stats.filesSeen, 0);
+const symlinkNodeReport = await collectUsage({
+  codexHome: symlinkHome,
+  cacheFile: path.join(root, 'symlink-node-cache.json'),
+  timezone: 'UTC',
+  discoveryMode: 'node',
+  pricingData,
+});
+assert.equal(symlinkNodeReport.totals.totalTokens, 0);
+assert.equal(symlinkNodeReport.stats.filesSeen, 0);
 
 await rm(root, { recursive: true, force: true });
 console.log('engine ok');
