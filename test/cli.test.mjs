@@ -67,7 +67,7 @@ assert.deepEqual(
     since: '2026-05-16',
     until: '2026-05-17',
     timezone: 'UTC',
-    cacheFile: '/tmp/cdxusage-cache.json',
+    cacheFile: path.resolve('/tmp/cdxusage-cache.json'),
   },
 );
 assert.equal(parseArgs(['daily', '--max-cache-bytes', '1048576']).maxCacheBytes, '1048576');
