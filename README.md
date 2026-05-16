@@ -157,6 +157,9 @@ Recent local sanity check on a large Codex history:
 | `cdxusage` | same filter, cold full scan | `31.61s` | `0.37 GB` | complete |
 | `cdxusage` | same filter, warm cached | `0.41s` | `0.16 GB` | complete |
 
+See [docs/benchmark-2026-05-16.md](docs/benchmark-2026-05-16.md) for the
+same-run command output behind this table.
+
 Cold scans read every matching JSONL file for correctness, including resumed
 long-lived sessions whose recent events may live in older session files. After
 the cache is built, the same report is dramatically faster: in this run, the
