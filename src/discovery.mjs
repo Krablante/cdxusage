@@ -9,21 +9,29 @@ export async function* discoverJsonlFiles(root, options = {}) {
   const mode = options.mode ?? 'auto';
   const stats = options.stats ?? {};
   if (mode !== 'node') {
-    let yielded = 0;
-    try {
-      for await (const entry of discoverJsonlFilesWithFind(root)) {
-        yielded += 1;
-        yield entry;
+    const unsupportedReason = findDiscoveryUnsupportedReason();
+    if (unsupportedReason) {
+      if (mode === 'find') {
+        throw new Error(`find discovery is unavailable: ${unsupportedReason}`);
       }
-      if (mode === 'find' || yielded > 0) {
-        stats.discoveryMode ??= 'find';
-        return;
+      stats.discoveryMode ??= `node-fallback:${unsupportedReason}`;
+    } else {
+      let yielded = 0;
+      try {
+        for await (const entry of discoverJsonlFilesWithFind(root)) {
+          yielded += 1;
+          yield entry;
+        }
+        if (mode === 'find' || yielded > 0) {
+          stats.discoveryMode ??= 'find';
+          return;
+        }
+      } catch (error) {
+        if (mode === 'find' || yielded > 0) {
+          throw error;
+        }
+        stats.discoveryMode ??= `node-fallback:${error.code ?? error.message}`;
       }
-    } catch (error) {
-      if (mode === 'find' || yielded > 0) {
-        throw error;
-      }
-      stats.discoveryMode ??= `node-fallback:${error.code ?? error.message}`;
     }
   }
 
@@ -31,6 +39,10 @@ export async function* discoverJsonlFiles(root, options = {}) {
   for await (const file of walkJsonl(root)) {
     yield { path: file };
   }
+}
+
+function findDiscoveryUnsupportedReason() {
+  return process.platform === 'linux' ? null : `unsupported platform ${process.platform}`;
 }
 
 async function* discoverJsonlFilesWithFind(root) {

@@ -644,15 +644,17 @@ await writeFile(
 );
 await symlink(path.join(symlinkTargets, 'linked.jsonl'), path.join(symlinkSessions, 'linked.jsonl'));
 await symlink(symlinkDirTarget, path.join(symlinkSessions, 'linked-dir'), 'dir');
-const symlinkReport = await collectUsage({
-  codexHome: symlinkHome,
-  cacheFile: path.join(root, 'symlink-cache.json'),
-  timezone: 'UTC',
-  discoveryMode: 'find',
-  pricingData,
-});
-assert.equal(symlinkReport.totals.totalTokens, 0);
-assert.equal(symlinkReport.stats.filesSeen, 0);
+if (process.platform === 'linux') {
+  const symlinkReport = await collectUsage({
+    codexHome: symlinkHome,
+    cacheFile: path.join(root, 'symlink-cache.json'),
+    timezone: 'UTC',
+    discoveryMode: 'find',
+    pricingData,
+  });
+  assert.equal(symlinkReport.totals.totalTokens, 0);
+  assert.equal(symlinkReport.stats.filesSeen, 0);
+}
 const symlinkNodeReport = await collectUsage({
   codexHome: symlinkHome,
   cacheFile: path.join(root, 'symlink-node-cache.json'),

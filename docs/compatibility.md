@@ -55,6 +55,10 @@ public ccusage Codex guide.
 
 ## Scanner Diagnostics
 
+`--discovery auto` uses GNU `find` only on Linux, then falls back to the
+portable Node walker when that toolchain is unavailable. Windows and other
+non-Linux hosts use the Node walker by default.
+
 Default scanner selection is `auto`: on Linux hosts with working `perl` and
 GNU-compatible `xargs -r`, `cdxusage` uses a native batch prefilter for cold
 full scans and falls back to the Node scanner when native tooling is
