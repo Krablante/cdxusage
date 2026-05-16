@@ -84,6 +84,34 @@ assert.equal(bundledGpt55Priority.price.cachedInputCostPerMToken, 1.25);
 assert.equal(bundledGpt55Priority.price.outputCostPerMToken, 75);
 assert.equal(bundledGpt55Priority.price.tiered, undefined);
 assert.equal(bundledGpt55Priority.detail.source, 'openai-priority-official-bundled');
+const officialPriorityFallbackModels = [
+  'gpt-5.5',
+  'gpt-5.4',
+  'gpt-5.4-mini',
+  'gpt-5.2',
+  'gpt-5.1',
+  'gpt-5',
+  'gpt-5-mini',
+  'gpt-5.1-codex',
+  'gpt-5-codex',
+  'gpt-4.1',
+  'gpt-4.1-mini',
+  'gpt-4.1-nano',
+  'gpt-4o',
+  'gpt-4o-2024-11-20',
+  'gpt-4o-2024-08-06',
+  'gpt-4o-2024-05-13',
+  'gpt-4o-mini',
+  'o3',
+  'o4-mini',
+];
+for (const model of officialPriorityFallbackModels) {
+  assert.equal(bundledPriority.getPricing(model).missing, false, `${model} priority fallback should be bundled`);
+}
+const bundledGpt4oMayPriority = bundledPriority.getPricing('gpt-4o-2024-05-13');
+assert.equal(bundledGpt4oMayPriority.price.inputCostPerMToken, 8.75);
+assert.equal(bundledGpt4oMayPriority.price.cachedInputCostPerMToken, 8.75);
+assert.equal(bundledGpt4oMayPriority.price.outputCostPerMToken, 26.25);
 
 const scopedPriority = await loadPricingCatalog({
   tier: 'priority',

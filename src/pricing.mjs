@@ -50,6 +50,7 @@ const BUNDLED_PRIORITY_PRICING = {
   'gpt-4o': officialPriorityPrice(4.25, 2.125, 17),
   'gpt-4o-2024-11-20': officialPriorityPrice(4.25, 2.125, 17),
   'gpt-4o-2024-08-06': officialPriorityPrice(4.25, 2.125, 17),
+  'gpt-4o-2024-05-13': officialPriorityPrice(8.75, 8.75, 26.25),
   'gpt-4o-mini': officialPriorityPrice(0.25, 0.125, 1),
   o3: officialPriorityPrice(3.5, 0.875, 14),
   'o4-mini': officialPriorityPrice(2, 0.5, 8),
