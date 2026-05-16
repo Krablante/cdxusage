@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { opendir, stat } from 'node:fs/promises';
+import { lstat, opendir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const FIND_FIELD_SEPARATOR = '\x1f';
@@ -134,13 +134,19 @@ async function* walkJsonl(root) {
     return;
   }
   for await (const entry of dir) {
-    if (entry.isSymbolicLink()) {
+    const full = path.join(root, entry.name);
+    let entryStat;
+    try {
+      entryStat = await lstat(full);
+    } catch {
       continue;
     }
-    const full = path.join(root, entry.name);
-    if (entry.isDirectory()) {
+    if (entryStat.isSymbolicLink()) {
+      continue;
+    }
+    if (entryStat.isDirectory()) {
       yield* walkJsonl(full);
-    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+    } else if (entryStat.isFile() && entry.name.endsWith('.jsonl')) {
       yield full;
     }
   }
