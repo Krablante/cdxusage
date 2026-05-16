@@ -22,9 +22,10 @@ estimated API-equivalent OpenAI cost.
 
 It is built for large Codex histories. The original
 `npx -y @ccusage/codex@latest` path can become painful on big archives: long
-CPU-bound scans, very high RAM use, and sometimes multi-GB to tens-of-GB memory
-growth before it finishes. `cdxusage` avoids that shape by streaming JSONL
-files, indexing compact per-file summaries, and reusing a small local cache.
+CPU-bound scans and RAM that scales with the full archive shape. On very large
+histories, that is the multi-GB failure mode `cdxusage` avoids by streaming
+JSONL files, indexing compact per-file summaries, and reusing a small local
+cache.
 
 No SQLite. No daemon. No provider catalogs. No background service.
 
@@ -158,10 +159,9 @@ long-lived sessions whose recent events may live in older session files. After
 the cache is built, the same report is dramatically faster: in this run, the
 warm cached path was at least 98.2% faster than the upstream timeout window.
 
-The timeout keeps the upstream run from reaching its worst failure mode. On
-large histories, that path can continue growing into multi-GB or tens-of-GB RAM
-use; `cdxusage` keeps memory bounded and predictable instead of loading a huge
-archive shape into RAM.
+The timeout keeps the upstream run from reaching its worst failure mode. The
+upstream path reads and sorts a large archive-shaped set of token events in
+memory; `cdxusage` keeps memory bounded and predictable by avoiding that shape.
 
 ## Portable Folder
 
