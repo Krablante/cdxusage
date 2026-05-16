@@ -1,4 +1,4 @@
-# cdxusage
+<h1 align="center">cdxusage</h1>
 
 <p align="center">
   <strong>The fastest measured, optimized local Codex usage meter for tokens, sessions, and estimated OpenAI cost.</strong>
