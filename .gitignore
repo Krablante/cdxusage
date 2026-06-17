@@ -6,7 +6,6 @@
 # Local agent/operator overlays
 AGENTS.md
 AGENTS.local.md
-atlas.toml
 
 # Logs, temp files, and local outputs
 *.log
